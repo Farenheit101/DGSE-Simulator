@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    
+        <script>
+            L_NO_TOUCH = false;
+            L_DISABLE_3D = false;
+        </script>
+    
+    <style>html, body {width: 100%;height: 100%;margin: 0;padding: 0;}</style>
+    <style>#map {position:absolute;top:0;bottom:0;right:0;left:0;}</style>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css"/>
+    
+            <meta name="viewport" content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+            <style>
+                #map_9c53727665e83098c359465053159fe3 {
+                    position: relative;
+                    width: 100.0%;
+                    height: 100.0%;
+                    left: 0.0%;
+                    top: 0.0%;
+                }
+                .leaflet-container { font-size: 1rem; }
+            </style>
+        
+</head>
+<body>
+    
+    
+            <div class="folium-map" id="map_9c53727665e83098c359465053159fe3" ></div>
+        
+</body>
+<script>
+    
+    
+            var map_9c53727665e83098c359465053159fe3 = L.map(
+                "map_9c53727665e83098c359465053159fe3",
+                {
+                    center: [52.09393289621832, -5.642638929055035],
+                    crs: L.CRS.EPSG3857,
+                    ...{
+  "zoom": 3,
+  "zoomControl": true,
+  "preferCanvas": false,
+}
+
+                }
+            );
+
+            
+
+        
+    
+            var tile_layer_48cf4c286a4fca314218ac724b225a51 = L.tileLayer(
+                "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                {
+  "minZoom": 0,
+  "maxZoom": 19,
+  "maxNativeZoom": 19,
+  "noWrap": false,
+  "attribution": "\u0026copy; \u003ca href=\"https://www.openstreetmap.org/copyright\"\u003eOpenStreetMap\u003c/a\u003e contributors",
+  "subdomains": "abc",
+  "detectRetina": false,
+  "tms": false,
+  "opacity": 1,
+}
+
+            );
+        
+    
+            tile_layer_48cf4c286a4fca314218ac724b225a51.addTo(map_9c53727665e83098c359465053159fe3);
+        
+    
+            var marker_28ad062c6ee461f0b8ec5450890be310 = L.marker(
+                [52.09393289621832, -5.642638929055035],
+                {
+}
+            ).addTo(map_9c53727665e83098c359465053159fe3);
+        
+    
+            var icon_50f0cb1e79bcbf9ba1e684b8801c4f67 = L.AwesomeMarkers.icon(
+                {
+  "markerColor": "green",
+  "iconColor": "white",
+  "icon": "info-sign",
+  "prefix": "glyphicon",
+  "extraClasses": "fa-rotate-0",
+}
+            );
+        
+    
+        var popup_523cbc00b68cf01638e6d2d059b2b75d = L.popup({
+  "maxWidth": "100%",
+});
+
+        
+            
+                var html_d276dc9b851aafb365fda9fab021668c = $(`<div id="html_d276dc9b851aafb365fda9fab021668c" style="width: 100.0%; height: 100.0%;">Agent Turlute</div>`)[0];
+                popup_523cbc00b68cf01638e6d2d059b2b75d.setContent(html_d276dc9b851aafb365fda9fab021668c);
+            
+        
+
+        marker_28ad062c6ee461f0b8ec5450890be310.bindPopup(popup_523cbc00b68cf01638e6d2d059b2b75d)
+        ;
+
+        
+    
+    
+                marker_28ad062c6ee461f0b8ec5450890be310.setIcon(icon_50f0cb1e79bcbf9ba1e684b8801c4f67);
+            
+    
+                var lat_lng_popup_1d947f72c3b13f9db227f7386924263a = L.popup();
+                function latLngPop(e) {
+                    lat_lng_popup_1d947f72c3b13f9db227f7386924263a
+                        .setLatLng(e.latlng)
+                        .setContent("Latitude: " + e.latlng.lat.toFixed(4) +
+                                    "<br>Longitude: " + e.latlng.lng.toFixed(4))
+                        .openOn(map_9c53727665e83098c359465053159fe3);
+                    }
+                map_9c53727665e83098c359465053159fe3.on('click', latLngPop);
+            
+</script>
+</html>
