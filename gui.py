@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget,
     QTabWidget, QHBoxLayout, QListWidget, QMessageBox, QInputDialog, QComboBox,
-    QDialog, QRadioButton, QButtonGroup, QCheckBox, QListWidgetItem, QFrame, QDialogButtonBox, QFormLayout
+    QDialog, QRadioButton, QButtonGroup, QCheckBox, QListWidgetItem, QFrame, QDialogButtonBox, QFormLayout, QProgressBar
 )
 from PyQt5.QtCore import QUrl, QTimer, Qt
 from PyQt5.QtWebEngineWidgets import QWebEngineView
@@ -67,6 +67,7 @@ class DGSESimGUI(QMainWindow):
         self.atlas_widget = atlas.LiveAtlasWidget()
         self.tabs.addTab(self.atlas_widget, "Atlas")
         self.tabs.addTab(self._tab_logistique(), "Logistique")
+        self.tabs.addTab(self._tab_cheat(), "Cheat")
 
         self.init_time_system()
 
@@ -87,6 +88,22 @@ class DGSESimGUI(QMainWindow):
         self.time_label.setStyleSheet("padding: 5px; font-weight: bold; background: #f3f3f3; color: #3b3b3b;")
         self.update_time_label()
 
+        # Barre d'état en haut à gauche (argent et réputation)
+        self.status_bar_left = QWidget()
+        status_layout = QHBoxLayout(self.status_bar_left)
+        status_layout.setContentsMargins(10, 5, 10, 5)
+        
+        # Affichage de la réputation (barre de progression colorée)
+        self.reputation_bar = QProgressBar()
+        self.reputation_bar.setRange(0, 100)
+        self.reputation_bar.setFixedWidth(180)
+        self.reputation_bar.setFormat("Réputation: %p%")
+        self.reputation_bar.setTextVisible(True)
+        status_layout.addWidget(self.reputation_bar)
+        
+        status_layout.addStretch(1)
+        
+        # Barre de temps en haut à droite
         self.time_btn_bar = QWidget()
         hbox = QHBoxLayout(self.time_btn_bar)
         hbox.setContentsMargins(0, 0, 0, 0)
@@ -101,9 +118,15 @@ class DGSESimGUI(QMainWindow):
 
         hbox.addWidget(self.time_label)
         hbox.addStretch(1)
+        
+        # Positionner les deux barres
+        self.tabs.setCornerWidget(self.status_bar_left, Qt.TopLeftCorner)
         self.tabs.setCornerWidget(self.time_btn_bar, Qt.TopRightCorner)
         self.set_time_speed(1)
         self.creation_reseaux_en_cours = []
+        
+        # Mise à jour initiale des labels de statut
+        self.update_status_labels()
 
     def set_time_speed(self, spd):
         self.paused = (spd == 0)
@@ -116,6 +139,28 @@ class DGSESimGUI(QMainWindow):
 
     def update_time_label(self):
         self.time_label.setText(self.current_game_time.strftime(" %d/%m/%Y  %H:%M:%S "))
+    
+    def update_status_labels(self):
+        """Met à jour l'affichage de la réputation"""
+        try:
+            # Mettre à jour la réputation
+            reputation_actuelle = budget.get_reputation_service()
+            self.reputation_bar.setValue(int(reputation_actuelle))
+            # Couleur dynamique selon la valeur
+            if reputation_actuelle <= 20:
+                color = "#e53935"  # rouge
+            elif reputation_actuelle <= 40:
+                color = "#fdd835"  # jaune
+            elif reputation_actuelle <= 70:
+                color = "#1e88e5"  # bleu
+            else:
+                color = "#43a047"  # vert
+            self.reputation_bar.setStyleSheet(
+                f"QProgressBar {{ border: 1px solid #bbb; border-radius: 3px; text-align: center; }} "
+                f"QProgressBar::chunk {{ background-color: {color}; }}"
+            )
+        except Exception as e:
+            print(f"Erreur lors de la mise à jour de la réputation: {e}")
 
     def advance_game_time(self):
         if not self.paused:
@@ -164,6 +209,12 @@ class DGSESimGUI(QMainWindow):
                 print(f"Erreur lors de l'avancement des actions: {e}")
             
             self.process_reseaux_creation()
+            
+            # Mettre à jour l'affichage de la réputation
+            self.update_status_labels()
+            # Rafraîchir l'onglet budget si présent
+            if hasattr(self, 'refresh_budget_tab'):
+                self.refresh_budget_tab()
 
 
     def process_reseaux_creation(self):
@@ -571,18 +622,42 @@ class DGSESimGUI(QMainWindow):
         layout = QVBoxLayout()
         label = QLabel("Budget global :")
         layout.addWidget(label)
-        solde = QLabel(f"Solde actuel : {budget.solde()} €")
-        layout.addWidget(solde)
-        histo = QListWidget()
-        for motif, montant in budget.historique():
-            histo.addItem(f"{motif}: {montant} €")
+        # Références pour rafraîchir dynamiquement
+        self.budget_solde_label = QLabel()
+        layout.addWidget(self.budget_solde_label)
+        
         layout.addWidget(QLabel("Historique des transactions :"))
-        layout.addWidget(histo)
-        etat = QLabel("Nouveau système budget: ACTIVÉ" if getattr(budget, 'NEW_BUDGET_ENABLED', False) else "Nouveau système budget: DÉSACTIVÉ")
-        etat.setStyleSheet("color: green;" if getattr(budget, 'NEW_BUDGET_ENABLED', False) else "color: gray;")
-        layout.addWidget(etat)
+        self.budget_histo_list = QListWidget()
+        layout.addWidget(self.budget_histo_list)
+        
+        self.budget_etat_label = QLabel("Nouveau système budget: ACTIVÉ" if getattr(budget, 'NEW_BUDGET_ENABLED', False) else "Nouveau système budget: DÉSACTIVÉ")
+        self.budget_etat_label.setStyleSheet("color: green;" if getattr(budget, 'NEW_BUDGET_ENABLED', False) else "color: gray;")
+        layout.addWidget(self.budget_etat_label)
+        
+        # Premier rafraîchissement
+        self.refresh_budget_tab()
         widget.setLayout(layout)
         return widget
+
+    def refresh_budget_tab(self):
+        """Rafraîchit l'onglet budget (solde et historique)"""
+        try:
+            if hasattr(self, 'budget_solde_label'):
+                solde_actuel = budget.solde()
+                solde_fmt = "{:,}".format(solde_actuel).replace(",", " ")
+                self.budget_solde_label.setText(f"Solde actuel : {solde_fmt} €")
+            if hasattr(self, 'budget_histo_list'):
+                self.budget_histo_list.clear()
+                for motif, montant in budget.historique()[-50:][::-1]:
+                    montant_fmt = "{:,}".format(montant).replace(",", " ")
+                    prefix = "+" if montant > 0 else ""
+                    self.budget_histo_list.addItem(f"{motif}: {prefix}{montant_fmt} €")
+            if hasattr(self, 'budget_etat_label'):
+                actif = getattr(budget, 'NEW_BUDGET_ENABLED', False)
+                self.budget_etat_label.setText("Nouveau système budget: ACTIVÉ" if actif else "Nouveau système budget: DÉSACTIVÉ")
+                self.budget_etat_label.setStyleSheet("color: green;" if actif else "color: gray;")
+        except Exception as e:
+            print(f"Erreur refresh_budget_tab: {e}")
 
     # ------------------ ONGLET LOGISTIQUE ------------------
     def _tab_logistique(self):
@@ -900,6 +975,18 @@ class DGSESimGUI(QMainWindow):
             dlg.accept()
             date_debut = self.current_game_time
             date_fin = date_debut + timedelta(days=duree_jours)
+            # Débiter le coût au lancement selon le système actif
+            try:
+                cout = budget.cout_recrutement_mode(type_recrutement)
+                if not budget.debiter(cout, f"Recrutement {type_recrutement} lancé"):
+                    QMessageBox.warning(self, "Budget insuffisant", f"Solde insuffisant pour payer {cout} €")
+                    return
+            except Exception as e:
+                print(f"Erreur débit recrutement: {e}")
+            # Rafraîchir affichages budget
+            self.update_status_labels()
+            if hasattr(self, 'refresh_budget_tab'):
+                self.refresh_budget_tab()
             RECRUTEMENTS_EN_COURS.append(RecrutementEnCours(type_recrutement, ciblage, date_debut, date_fin))
             
             # Message de confirmation avec détails du ciblage
@@ -2080,6 +2167,212 @@ class DGSESimGUI(QMainWindow):
         
         action_dlg.setLayout(layout)
         action_dlg.exec_()
+
+    # ------------------ ONGLET CHEAT ------------------
+    def _tab_cheat(self):
+        """Onglet pour les fonctions de test et de cheat"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        
+        # Titre
+        titre = QLabel("<h2>🔧 Menu Cheat - Tests et Développement</h2>")
+        titre.setAlignment(Qt.AlignCenter)
+        layout.addWidget(titre)
+        
+        # Section Argent
+        argent_frame = QFrame()
+        argent_frame.setFrameStyle(QFrame.Box)
+        argent_layout = QVBoxLayout(argent_frame)
+        argent_layout.addWidget(QLabel("<b>💰 Gestion de l'Argent</b>"))
+        
+        # Affichage du solde actuel
+        self.solde_actuel_label = QLabel()
+        argent_layout.addWidget(self.solde_actuel_label)
+        
+        # Boutons pour modifier l'argent
+        argent_btn_layout = QHBoxLayout()
+        
+        btn_ajouter_argent = QPushButton("+ 10,000€")
+        btn_ajouter_argent.clicked.connect(lambda: self.modifier_argent(10000))
+        argent_btn_layout.addWidget(btn_ajouter_argent)
+        
+        btn_ajouter_gros_argent = QPushButton("+ 100,000€")
+        btn_ajouter_gros_argent.clicked.connect(lambda: self.modifier_argent(100000))
+        argent_btn_layout.addWidget(btn_ajouter_gros_argent)
+        
+        btn_retirer_argent = QPushButton("- 10,000€")
+        btn_retirer_argent.clicked.connect(lambda: self.modifier_argent(-10000))
+        argent_btn_layout.addWidget(btn_retirer_argent)
+        
+        argent_layout.addLayout(argent_btn_layout)
+        
+        # Saisie manuelle
+        argent_input_layout = QHBoxLayout()
+        argent_input_layout.addWidget(QLabel("Montant personnalisé:"))
+        self.argent_input = QInputDialog()
+        self.argent_input.setInputMode(QInputDialog.IntInput)
+        self.argent_input.setIntRange(-1000000, 1000000)
+        self.argent_input.setIntValue(0)
+        
+        btn_argent_perso = QPushButton("Appliquer")
+        btn_argent_perso.clicked.connect(self.modifier_argent_personnalise)
+        argent_input_layout.addWidget(btn_argent_perso)
+        
+        argent_layout.addLayout(argent_input_layout)
+        layout.addWidget(argent_frame)
+        
+        # Section Réputation
+        reputation_frame = QFrame()
+        reputation_frame.setFrameStyle(QFrame.Box)
+        reputation_layout = QVBoxLayout(reputation_frame)
+        reputation_layout.addWidget(QLabel("<b>⭐ Gestion de la Réputation</b>"))
+        
+        # Affichage de la réputation actuelle
+        self.reputation_actuelle_label = QLabel()
+        reputation_layout.addWidget(self.reputation_actuelle_label)
+        
+        # Boutons pour modifier la réputation
+        reputation_btn_layout = QHBoxLayout()
+        
+        btn_ajouter_reputation = QPushButton("+ 10 points")
+        btn_ajouter_reputation.clicked.connect(lambda: self.modifier_reputation(10))
+        reputation_btn_layout.addWidget(btn_ajouter_reputation)
+        
+        btn_ajouter_grosse_reputation = QPushButton("+ 25 points")
+        btn_ajouter_grosse_reputation.clicked.connect(lambda: self.modifier_reputation(25))
+        reputation_btn_layout.addWidget(btn_ajouter_grosse_reputation)
+        
+        btn_retirer_reputation = QPushButton("- 10 points")
+        btn_retirer_reputation.clicked.connect(lambda: self.modifier_reputation(-10))
+        reputation_btn_layout.addWidget(btn_retirer_reputation)
+        
+        reputation_layout.addLayout(reputation_btn_layout)
+        
+        # Saisie manuelle de la réputation
+        reputation_input_layout = QHBoxLayout()
+        reputation_input_layout.addWidget(QLabel("Réputation personnalisée:"))
+        self.reputation_input = QInputDialog()
+        self.reputation_input.setInputMode(QInputDialog.IntInput)
+        self.reputation_input.setIntRange(0, 100)
+        self.reputation_input.setIntValue(50)
+        
+        btn_reputation_perso = QPushButton("Appliquer")
+        btn_reputation_perso.clicked.connect(self.modifier_reputation_personnalisee)
+        reputation_input_layout.addWidget(btn_reputation_perso)
+        
+        reputation_layout.addLayout(reputation_input_layout)
+        layout.addWidget(reputation_frame)
+        
+        # Section Actions rapides
+        actions_frame = QFrame()
+        actions_frame.setFrameStyle(QFrame.Box)
+        actions_layout = QVBoxLayout(actions_frame)
+        actions_layout.addWidget(QLabel("<b>⚡ Actions Rapides</b>"))
+        
+        actions_btn_layout = QHBoxLayout()
+        
+        btn_reset_complet = QPushButton("Reset Complet")
+        btn_reset_complet.clicked.connect(self.reset_complet)
+        actions_btn_layout.addWidget(btn_reset_complet)
+        
+        btn_max_reputation = QPushButton("Max Réputation")
+        btn_max_reputation.clicked.connect(lambda: self.modifier_reputation(100))
+        actions_btn_layout.addWidget(btn_max_reputation)
+        
+        btn_max_argent = QPushButton("Max Argent")
+        btn_max_argent.clicked.connect(lambda: self.modifier_argent(1000000))
+        actions_btn_layout.addWidget(btn_max_argent)
+        
+        actions_layout.addLayout(actions_btn_layout)
+        layout.addWidget(actions_frame)
+        
+        # Bouton rafraîchir
+        btn_rafraichir = QPushButton("🔄 Rafraîchir l'affichage")
+        btn_rafraichir.clicked.connect(self.rafraichir_cheat)
+        layout.addWidget(btn_rafraichir)
+        
+        # Mise à jour initiale
+        self.rafraichir_cheat()
+        
+        widget.setLayout(layout)
+        return widget
+    
+    def modifier_argent(self, montant):
+        """Modifie l'argent du service"""
+        try:
+            if montant > 0:
+                budget.crediter(montant, f"Cheat: ajout de {montant}€")
+            else:
+                budget.debiter(abs(montant), f"Cheat: retrait de {abs(montant)}€")
+            self.rafraichir_cheat()
+            self.update_status_labels()
+            QMessageBox.information(self, "Succès", f"Argent modifié de {montant:+d}€")
+        except Exception as e:
+            QMessageBox.warning(self, "Erreur", f"Erreur lors de la modification: {e}")
+    
+    def modifier_argent_personnalise(self):
+        """Modifie l'argent avec un montant personnalisé"""
+        montant, ok = QInputDialog.getInt(self, "Modifier l'argent", 
+                                         "Entrez le montant à ajouter/retirer:", 0, -1000000, 1000000)
+        if ok:
+            self.modifier_argent(montant)
+    
+    def modifier_reputation(self, points):
+        """Modifie la réputation du service"""
+        try:
+            nouvelle_reputation = budget.ajouter_reputation_service(points)
+            self.rafraichir_cheat()
+            self.update_status_labels()
+            QMessageBox.information(self, "Succès", f"Réputation modifiée de {points:+d} points\nNouvelle réputation: {nouvelle_reputation}/100")
+        except Exception as e:
+            QMessageBox.warning(self, "Erreur", f"Erreur lors de la modification: {e}")
+    
+    def modifier_reputation_personnalisee(self):
+        """Modifie la réputation avec une valeur personnalisée"""
+        reputation, ok = QInputDialog.getInt(self, "Modifier la réputation", 
+                                            "Entrez la nouvelle réputation:", 50, 0, 100)
+        if ok:
+            try:
+                nouvelle_reputation = budget.modifier_reputation_service(reputation)
+                self.rafraichir_cheat()
+                self.update_status_labels()
+                QMessageBox.information(self, "Succès", f"Réputation définie à {nouvelle_reputation}/100")
+            except Exception as e:
+                QMessageBox.warning(self, "Erreur", f"Erreur lors de la modification: {e}")
+    
+    def reset_complet(self):
+        """Reset complet de l'argent et de la réputation"""
+        try:
+            # Reset de l'argent
+            solde_actuel = budget.solde()
+            if solde_actuel != 200000:
+                if solde_actuel > 200000:
+                    budget.debiter(solde_actuel - 200000, "Cheat: reset argent")
+                else:
+                    budget.crediter(200000 - solde_actuel, "Cheat: reset argent")
+            
+            # Reset de la réputation
+            budget.modifier_reputation_service(50)
+            
+            self.rafraichir_cheat()
+            self.update_status_labels()
+            QMessageBox.information(self, "Reset Complet", "Argent et réputation remis aux valeurs par défaut")
+        except Exception as e:
+            QMessageBox.warning(self, "Erreur", f"Erreur lors du reset: {e}")
+    
+    def rafraichir_cheat(self):
+        """Rafraîchit l'affichage de l'onglet cheat"""
+        try:
+            # Mettre à jour l'affichage de l'argent
+            solde_actuel = budget.solde()
+            solde_fmt = "{:,}".format(solde_actuel).replace(",", " ")
+            self.solde_actuel_label.setText(f"Solde actuel: {solde_fmt} €")
+            
+            # Mettre à jour l'affichage de la réputation
+            reputation_actuelle = budget.get_reputation_service()
+            self.reputation_actuelle_label.setText(f"Réputation actuelle: {reputation_actuelle}/100")
+        except Exception as e:
+            print(f"Erreur lors du rafraîchissement de l'onglet cheat: {e}")
 
 
 def run_gui():

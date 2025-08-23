@@ -3,8 +3,8 @@
 SOLDE = 200000  # Solde de départ (modulable)
 HISTORIQUE = []
 
-# --- Nouveau système de budget (désactivé par défaut) ---
-NEW_BUDGET_ENABLED = False  # Active le nouveau modèle lorsqu'il passera en production
+# --- Nouveau système de budget (activé par défaut) ---
+NEW_BUDGET_ENABLED = True  # Active le nouveau modèle
 
 # Montants fixes pour le recrutement d'agents (nouveau système)
 RECRUIT_COST_ALEA = 2000
@@ -13,8 +13,8 @@ RECRUIT_COST_CIBLE = 5000
 # Dépenses planifiées (futures fonctionnalités)
 PLANNED_EXPENSES = []  # {"nom": str, "montant": int, "categorie": str, "date": datetime}
 
-# Suivi rente quotidienne
-_DERNIERE_RENTE_DATE = None  # last day when rente was credited
+# Suivi rente mensuelle
+_DERNIERE_RENTE_MOIS = None  # (année, mois) du dernier crédit de rente
 
 def is_new_budget_enabled():
     return NEW_BUDGET_ENABLED
@@ -67,10 +67,24 @@ def cout_recrutement_mode(type_recrutement):
     # Par défaut, considérer aléatoire si inconnu
     return RECRUIT_COST_ALEA
 
+# Variable globale pour la réputation
+REPUTATION_SERVICE = 50  # Réputation entre 0 et 100
+
 def get_reputation_service():
-    # Placeholder : sera remplacé par le futur système de réputation
-    # Retourne une réputation entre 0 et 100
-    return 50
+    """Retourne la réputation actuelle du service"""
+    return REPUTATION_SERVICE
+
+def modifier_reputation_service(nouvelle_reputation):
+    """Modifie la réputation du service (entre 0 et 100)"""
+    global REPUTATION_SERVICE
+    REPUTATION_SERVICE = max(0, min(100, nouvelle_reputation))
+    return REPUTATION_SERVICE
+
+def ajouter_reputation_service(points):
+    """Ajoute des points de réputation"""
+    global REPUTATION_SERVICE
+    REPUTATION_SERVICE = max(0, min(100, REPUTATION_SERVICE + points))
+    return REPUTATION_SERVICE
 
 def calculer_rente_journaliere(reputation):
     # Formule simple et modulable
@@ -78,17 +92,16 @@ def calculer_rente_journaliere(reputation):
     return 1000 + int(30 * max(0, min(100, reputation)))
 
 def tick_time(current_datetime):
-    # Crédite la rente une fois par jour, uniquement si le nouveau système est actif
-    global _DERNIERE_RENTE_DATE
+    # Crédite la rente une fois par mois ingame (10 000€), uniquement si le nouveau système est actif
+    global _DERNIERE_RENTE_MOIS
     if not NEW_BUDGET_ENABLED:
         return
     if current_datetime is None:
         return
-    jour = current_datetime.date()
-    if _DERNIERE_RENTE_DATE is None or jour > _DERNIERE_RENTE_DATE:
-        _DERNIERE_RENTE_DATE = jour
-        rente = calculer_rente_journaliere(get_reputation_service())
-        crediter(rente, motif="Rente quotidienne (réputation)")
+    annee_mois = (current_datetime.year, current_datetime.month)
+    if _DERNIERE_RENTE_MOIS is None or annee_mois != _DERNIERE_RENTE_MOIS:
+        _DERNIERE_RENTE_MOIS = annee_mois
+        crediter(10000, motif="Rente mensuelle")
 
 def planifier_depense(nom, montant, categorie="général", date=None):
     # Enregistre une dépense à exécuter plus tard (non bloquant tant que désactivé)
