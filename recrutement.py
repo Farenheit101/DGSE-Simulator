@@ -3,6 +3,7 @@ from agents import Agent, ajouter_agent
 from noms import generer_nom_prenom
 from metiers import METIERS, choisir_metier_competence, generer_metier_aleatoire
 from budget import debiter
+import budget
 from langues import LANGUES_PAR_PAYS
 from bureaux import lister_bureaux
 from datetime import datetime, timedelta
@@ -11,7 +12,8 @@ from bureaux import lister_bureaux
 UNIVERSAL_AGENT_SKILLS = [
     "Infiltration", "Surveillance", "Hacking", "Langues étrangères",
     "Négociation", "Combat rapproché", "Crypto", "Conduite",
-    "Déguisement", "Tir", "Protection", "Renseignement"
+    "Déguisement", "Tir", "Protection", "Renseignement",
+    "Analyse", "Technique", "Sécurité", "Gestion", "Recherche"
 ]
 METIER_SKILLS = set()
 for metier in METIERS.values():
@@ -98,6 +100,10 @@ def generer_profils(nb, ciblage=None):
             "metier": metier_nom,
             "entreprise": entreprise,
         }
+        # Nouveau système: harmonise l'affichage du coût si activé
+        if budget.is_new_budget_enabled():
+            type_recrutement = "classique" if not ciblage else "cible"
+            profil["cout"] = budget.cout_recrutement_mode(type_recrutement)
         profils.append(profil)
     return profils
 
@@ -116,12 +122,20 @@ def generer_profils_blocant(nb, ciblage=None, delay=7):
     time.sleep(delay)
     return generer_profils(nb, ciblage)
 
-def valider_recrutement(profil, bureau_choisi, legende_nom_choisi=None, forcer=False):
-    cout = profil["cout"]
-    risque = 0
-    if forcer and bureau_choisi != profil["bureau_ideal"]:
-        cout += 5000
-        risque = 1
+def valider_recrutement(profil, bureau_choisi, legende_nom_choisi=None, forcer=False, type_recrutement=None):
+    # Détermine le coût en fonction du système actif
+    if budget.is_new_budget_enabled():
+        # Nouveau modèle: coût fixe selon le type
+        t = type_recrutement or ("classique" if profil is None else ("classique" if profil and profil.get("bureau_ideal") else "classique"))
+        cout = budget.cout_recrutement_mode(t)
+        risque = 1 if (forcer and bureau_choisi != profil.get("bureau_ideal")) else 0
+    else:
+        # Ancien modèle conservé tant que le flag est désactivé
+        cout = profil["cout"]
+        risque = 0
+        if forcer and bureau_choisi != profil["bureau_ideal"]:
+            cout += 5000
+            risque = 1
     if not debiter(cout, f"Recrutement agent ({profil['nom']} {profil['prenom']})"):
         return None, "Fonds insuffisants"
     agent = Agent(

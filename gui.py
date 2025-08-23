@@ -29,6 +29,9 @@ import reseaux
 import atlas
 import logistique
 import villes
+import dossiers_suspects
+import actions_crises
+from gestionnaire_actions import gestionnaire_actions
 
 RECRUTEMENTS_EN_COURS = []
 ALERTES_EN_COURS = []
@@ -119,6 +122,12 @@ class DGSESimGUI(QMainWindow):
             minutes_to_add = self.speed_to_minutes.get(self.time_speed, 3)
             self.current_game_time += timedelta(minutes=minutes_to_add)
             self.update_time_label()
+            # Nouveau système de budget (feature flag): applique la rente et les dépenses planifiées
+            try:
+                budget.tick_time(self.current_game_time)
+                budget.executer_depenses_planifiees(self.current_game_time)
+            except Exception:
+                pass
             self.check_automatic_events()
             self.process_timed_events()
             for m in missions.MISSIONS:
@@ -126,10 +135,34 @@ class DGSESimGUI(QMainWindow):
                     m.maj_etat(self.current_game_time)
             for c in crises.CRISES:
                 if hasattr(c, 'maj_etat'):
+                    # Appliquer la dégradation naturelle (quotidienne)
+                    if hasattr(c, 'appliquer_degradation_naturelle'):
+                        c.appliquer_degradation_naturelle(self.current_game_time)
+                    # Mettre à jour l'état
                     c.maj_etat(self.current_game_time)
+            
+            # Vérifier les statuts temporaires des agents
+            for agent in agents.AGENTS:
+                if hasattr(agent, 'verifier_fin_statut'):
+                    agent.verifier_fin_statut(self.current_game_time)
+            
+            # Rafraîchir l'interface des agents si elle est visible
+            if hasattr(self, 'agentList') and self.agentList.isVisible():
+                self.refresh_agents()
+            
+            # Rafraîchir l'interface des crises si elle est visible
+            if hasattr(self, 'criseList') and self.criseList.isVisible():
+                self.refresh_crises_onglet()
             for exf in logistique.lister_exfiltrations():
                 if exf.get("date_fin") and exf["statut"] == "En attente" and self.current_game_time >= exf["date_fin"]:
                     exf["statut"] = "Terminée"
+            
+            # Avancer les actions sur les crises
+            try:
+                gestionnaire_actions.avancer_actions(self.current_game_time)
+            except Exception as e:
+                print(f"Erreur lors de l'avancement des actions: {e}")
+            
             self.process_reseaux_creation()
 
 
@@ -175,7 +208,8 @@ class DGSESimGUI(QMainWindow):
         self.liste_crises = QListWidget()
         self.liste_missions = QListWidget()
         self.liste_alertes.itemDoubleClicked.connect(self.popup_alerte)
-        self.liste_crises.itemDoubleClicked.connect(self.popup_crise)
+        # Suppression du double-clic sur la liste des crises de l'accueil
+        # self.liste_crises.itemDoubleClicked.connect(self.popup_crise)
         self.liste_missions.itemDoubleClicked.connect(self.popup_mission)
         side_layout = QVBoxLayout()
         side_layout.addWidget(QLabel("Alertes (France) :"))
@@ -204,10 +238,14 @@ class DGSESimGUI(QMainWindow):
             ).add_to(m)
         for crise in crises.CRISES:
             lat, lon = getattr(crise, 'lat', 48.85), getattr(crise, 'lon', 2.35)
+            
+            # Couleur du marqueur selon la gravité de la crise
+            couleur_marqueur = self._get_couleur_gravite_crise(crise)
+            
             folium.Marker(
                 [lat, lon],
                 popup=self._popup_crise(crise),
-                icon=folium.Icon(color='red', icon='exclamation-sign', prefix='glyphicon')
+                icon=folium.Icon(color=couleur_marqueur, icon='exclamation-sign', prefix='glyphicon')
             ).add_to(m)
         for nom, r in reseaux.RESEAUX.items():
             lat, lon = r.get('lat', 48.85), r.get('lon', 2.35)
@@ -228,9 +266,8 @@ class DGSESimGUI(QMainWindow):
         return txt
 
     def _popup_crise(self, crise):
-        txt = f"<b>Crise :</b> {crise.nom}<br>Statut : {crise.statut}"
-        if hasattr(crise, 'origine') and crise.origine:
-            txt += f"<br>Origine : {crise.origine}"
+        """Popup simplifié pour la carte OSM : seulement nom et statut"""
+        txt = f"<b>Crise :</b> {crise.nom}<br><b>Statut :</b> {crise.statut}"
         return txt
 
     def _popup_reseau(self, nom, r):
@@ -239,14 +276,46 @@ class DGSESimGUI(QMainWindow):
         txt += f"<br>Agents : {len(r['agents'])}, Sources : {len(r['sources'])}"
         return txt
 
+    def _get_couleur_gravite_crise(self, crise):
+        """Retourne la couleur du marqueur selon la gravité de la crise"""
+        gravite = getattr(crise, 'gravite', 'Élevée').lower()
+        
+        couleurs = {
+            'faible': 'green',      # Vert pour faible
+            'modérée': 'yellow',    # Jaune pour modérée  
+            'élevée': 'orange',     # Orange pour élevée
+            'critique': 'red',      # Rouge pour critique
+            'maximale': 'purple'    # Violet pour maximale
+        }
+        
+        return couleurs.get(gravite, 'red')  # Rouge par défaut si gravité inconnue
+
     def refresh_agents(self):
         self.agentList.clear()
         for a in agents.AGENTS:
             nc = f" (Code: {a.nom_code})" if getattr(a, "nom_code", None) else ""
-            item_str = f"{a.nom} {a.prenom}{nc} ({a.bureau})"
+            statut = getattr(a, "statut", "Disponible")
+            item_str = f"{a.nom} {a.prenom}{nc} ({a.bureau}) - {statut}"
             item = QListWidgetItem(item_str)
-            if getattr(a, "statut_legende", False):
+            
+            # Couleur selon le statut
+            if statut == "Disponible":
+                item.setForeground(Qt.darkGreen)
+            elif statut == "En mission":
+                item.setForeground(Qt.darkBlue)
+            elif statut == "Blessé":
+                item.setForeground(Qt.darkRed)
+            elif statut == "Disparu":
+                item.setForeground(Qt.darkMagenta)
+            elif statut == "Mort":
+                item.setForeground(Qt.black)
+            elif statut == "En repos":
                 item.setForeground(Qt.darkYellow)
+            
+            # Légende en surbrillance
+            if getattr(a, "statut_legende", False):
+                item.setBackground(Qt.yellow)
+            
             self.agentList.addItem(item)
         self.generate_osm_map()
         self.webView.load(QUrl.fromLocalFile(os.path.abspath(self.map_path)))
@@ -305,10 +374,28 @@ class DGSESimGUI(QMainWindow):
         self.agentList = QListWidget()
         for a in agents.AGENTS:
             nc = f" (Code: {a.nom_code})" if getattr(a, "nom_code", None) else ""
-            item_str = f"{a.nom} {a.prenom}{nc} ({a.bureau})"
+            statut = getattr(a, "statut", "Disponible")
+            item_str = f"{a.nom} {a.prenom}{nc} ({a.bureau}) - {statut}"
             item = QListWidgetItem(item_str)
-            if getattr(a, "statut_legende", False):
+            
+            # Couleur selon le statut
+            if statut == "Disponible":
+                item.setForeground(Qt.darkGreen)
+            elif statut == "En mission":
+                item.setForeground(Qt.darkBlue)
+            elif statut == "Blessé":
+                item.setForeground(Qt.darkRed)
+            elif statut == "Disparu":
+                item.setForeground(Qt.darkMagenta)
+            elif statut == "Mort":
+                item.setForeground(Qt.black)
+            elif statut == "En repos":
                 item.setForeground(Qt.darkYellow)
+            
+            # Légende en surbrillance
+            if getattr(a, "statut_legende", False):
+                item.setBackground(Qt.yellow)
+            
             self.agentList.addItem(item)
         layout.addWidget(self.agentList)
         self.agentList.itemDoubleClicked.connect(self.ouvrir_fiche_agent)
@@ -397,12 +484,40 @@ class DGSESimGUI(QMainWindow):
         label = QLabel("Crises en cours :")
         layout.addWidget(label)
         self.criseList = QListWidget()
+        
+        # Ajout du double-clic pour ouvrir la fenêtre détaillée
+        self.criseList.itemDoubleClicked.connect(self.popup_crise_onglet)
+        
         for c in crises.CRISES:
-            self.criseList.addItem(f"{c.nom} ({c.statut})")
+            # Affichage enrichi avec origine, gravité, pays et progression
+            info_crise = f"{c.nom} - {c.origine} ({c.gravite})"
+            if hasattr(c, 'pays') and c.pays:
+                info_crise += f" - {c.pays.title()}"
+            # Ajouter la progression
+            progression = getattr(c, 'progression', 100)
+            info_crise += f" - {progression:.1f}%"
+            info_crise += f" [{c.statut}]"
+            self.criseList.addItem(info_crise)
         layout.addWidget(self.criseList)
+        
+        # Boutons d'action
+        btn_layout = QHBoxLayout()
+        
         del_btn = QPushButton("Supprimer la crise sélectionnée")
         del_btn.clicked.connect(self.supprimer_crise)
-        layout.addWidget(del_btn)
+        btn_layout.addWidget(del_btn)
+        
+        # Bouton pour rafraîchir la liste
+        refresh_btn = QPushButton("Rafraîchir")
+        refresh_btn.clicked.connect(self.refresh_crises_onglet)
+        btn_layout.addWidget(refresh_btn)
+        
+        # Bouton pour voir les actions en cours
+        actions_btn = QPushButton("Actions en cours")
+        actions_btn.clicked.connect(self._voir_actions_en_cours)
+        btn_layout.addWidget(actions_btn)
+        
+        layout.addLayout(btn_layout)
         widget.setLayout(layout)
         return widget
 
@@ -412,6 +527,11 @@ class DGSESimGUI(QMainWindow):
             crise = crises.CRISES[idx]
             confirm = QMessageBox.question(self, "Supprimer", f"Supprimer {crise.nom} ?")
             if confirm == QMessageBox.Yes:
+                # Supprimer les dossiers suspects associés
+                nb_dossiers_supprimes = dossiers_suspects.supprimer_dossiers_crise(crise.nom)
+                if nb_dossiers_supprimes > 0:
+                    QMessageBox.information(self, "Nettoyage", f"{nb_dossiers_supprimes} dossier(s) suspect(s) supprimé(s)")
+                
                 crises.supprimer_crise(idx)
                 self.refresh_crises()
 
@@ -458,6 +578,9 @@ class DGSESimGUI(QMainWindow):
             histo.addItem(f"{motif}: {montant} €")
         layout.addWidget(QLabel("Historique des transactions :"))
         layout.addWidget(histo)
+        etat = QLabel("Nouveau système budget: ACTIVÉ" if getattr(budget, 'NEW_BUDGET_ENABLED', False) else "Nouveau système budget: DÉSACTIVÉ")
+        etat.setStyleSheet("color: green;" if getattr(budget, 'NEW_BUDGET_ENABLED', False) else "color: gray;")
+        layout.addWidget(etat)
         widget.setLayout(layout)
         return widget
 
@@ -655,8 +778,8 @@ class DGSESimGUI(QMainWindow):
         dlg = QDialog(self)
         dlg.setWindowTitle("Recrutement d'agent - Sélectionnez le mode")
         layout = QVBoxLayout(dlg)
-        radio_alea = QRadioButton("Recrutement aléatoire (rapide, peu exigeant)")
-        radio_cible = QRadioButton("Recrutement ciblé (compétences/bureau)")
+        radio_alea = QRadioButton("Recrutement aléatoire (rapide, peu exigeant) — 2000 €")
+        radio_cible = QRadioButton("Recrutement ciblé — 5000 €")
         radio_alea.setChecked(True)
         group = QButtonGroup(dlg)
         group.addButton(radio_alea)
@@ -664,33 +787,77 @@ class DGSESimGUI(QMainWindow):
         layout.addWidget(radio_alea)
         layout.addWidget(radio_cible)
         layout.addWidget(QLabel(" "))
-        layout.addWidget(QLabel("Pour recrutement ciblé, choisissez vos critères :"))
+        
+        # Critères de ciblage
+        criteres_frame = QWidget()
+        criteres_layout = QVBoxLayout(criteres_frame)
+        
+        # Options de ciblage
+        criteres_layout.addWidget(QLabel("<b>Type de ciblage :</b>"))
+        radio_bureau = QRadioButton("Par bureau uniquement")
+        radio_competences = QRadioButton("Par compétences uniquement")
+        radio_mixte = QRadioButton("Par bureau ET compétences")
+        radio_bureau.setChecked(True)
+        
+        group_ciblage = QButtonGroup(criteres_frame)
+        group_ciblage.addButton(radio_bureau)
+        group_ciblage.addButton(radio_competences)
+        group_ciblage.addButton(radio_mixte)
+        
+        criteres_layout.addWidget(radio_bureau)
+        criteres_layout.addWidget(radio_competences)
+        criteres_layout.addWidget(radio_mixte)
+        criteres_layout.addWidget(QLabel(" "))
+        
+        # Sélection du bureau
+        bureau_frame = QWidget()
+        bureau_layout = QVBoxLayout(bureau_frame)
+        bureau_layout.addWidget(QLabel("<b>Bureau souhaité :</b>"))
         bureau_combo = QComboBox()
         bureau_combo.addItems([b['code'] for b in bureaux.BUREAUX])
-        layout.addWidget(QLabel("Bureau (optionnel) :"))
-        layout.addWidget(bureau_combo)
-        comp_label = QLabel("Compétences (optionnelles) :")
-        layout.addWidget(comp_label)
+        bureau_layout.addWidget(bureau_combo)
+        criteres_layout.addWidget(bureau_frame)
+        
+        # Sélection des compétences
+        comp_frame = QWidget()
+        comp_layout = QVBoxLayout(comp_frame)
+        comp_layout.addWidget(QLabel("<b>Compétences souhaitées :</b>"))
         comp_boxes = []
-        for c in ["Infiltration", "Surveillance", "Hacking", "Langues étrangères", "Négociation", "Combat rapproché", "Crypto", "Conduite", "Déguisement"]:
+        for c in ["Infiltration", "Surveillance", "Hacking", "Langues étrangères", 
+                 "Négociation", "Combat rapproché", "Crypto", "Conduite", "Déguisement",
+                 "Analyse", "Technique", "Sécurité", "Gestion", "Recherche"]:
             box = QCheckBox(c)
             comp_boxes.append(box)
-            layout.addWidget(box)
-        bureau_combo.setEnabled(False)
-        comp_label.setEnabled(False)
-        for box in comp_boxes: box.setEnabled(False)
-        radio_cible.toggled.connect(lambda checked: [
-            bureau_combo.setEnabled(checked),
-            comp_label.setEnabled(checked),
-            [box.setEnabled(checked) for box in comp_boxes]
-        ])
+            comp_layout.addWidget(box)
+        criteres_layout.addWidget(comp_frame)
+        
+        layout.addWidget(criteres_frame)
+        
+        # Activer/désactiver les sections selon le type de recrutement
+        def update_sections():
+            is_cible = radio_cible.isChecked()
+            criteres_frame.setEnabled(is_cible)
+            
+            # Activer/désactiver selon le type de ciblage
+            if is_cible:
+                bureau_frame.setEnabled(radio_bureau.isChecked() or radio_mixte.isChecked())
+                comp_frame.setEnabled(radio_competences.isChecked() or radio_mixte.isChecked())
+            else:
+                bureau_frame.setEnabled(False)
+                comp_frame.setEnabled(False)
+        
+        radio_cible.toggled.connect(update_sections)
+        radio_bureau.toggled.connect(update_sections)
+        radio_competences.toggled.connect(update_sections)
+        radio_mixte.toggled.connect(update_sections)
+        update_sections()
         go_btn = QPushButton("Lancer recrutement")
         layout.addWidget(go_btn)
         result_lbl = QLabel("")
         layout.addWidget(result_lbl)
         def lancer_recrutement():
             result_lbl.setText("Recrutement en cours... (délai ingame)")
-            dlg.accept()
+            
             if radio_alea.isChecked():
                 type_recrutement = "classique"
                 duree_jours = 2
@@ -699,14 +866,52 @@ class DGSESimGUI(QMainWindow):
                 type_recrutement = "cible"
                 duree_jours = 5
                 ciblage = {}
-                if bureau_combo.currentText():
+                
+                # Vérifier le type de ciblage
+                if radio_bureau.isChecked():
+                    # Ciblage par bureau uniquement
+                    if bureau_combo.currentText():
+                        ciblage["bureau"] = bureau_combo.currentText()
+                    else:
+                        QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un bureau.")
+                        return
+                
+                elif radio_competences.isChecked():
+                    # Ciblage par compétences uniquement
+                    comp_select = [box.text() for box in comp_boxes if box.isChecked()]
+                    if comp_select:
+                        ciblage["competences"] = comp_select
+                    else:
+                        QMessageBox.warning(self, "Erreur", "Veuillez sélectionner au moins une compétence.")
+                        return
+                
+                elif radio_mixte.isChecked():
+                    # Ciblage mixte (bureau + compétences)
+                    if not bureau_combo.currentText():
+                        QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un bureau.")
+                        return
+                    comp_select = [box.text() for box in comp_boxes if box.isChecked()]
+                    if not comp_select:
+                        QMessageBox.warning(self, "Erreur", "Veuillez sélectionner au moins une compétence.")
+                        return
                     ciblage["bureau"] = bureau_combo.currentText()
-                comp_select = [box.text() for box in comp_boxes if box.isChecked()]
-                if comp_select: ciblage["competences"] = comp_select
+                    ciblage["competences"] = comp_select
+            
+            dlg.accept()
             date_debut = self.current_game_time
             date_fin = date_debut + timedelta(days=duree_jours)
             RECRUTEMENTS_EN_COURS.append(RecrutementEnCours(type_recrutement, ciblage, date_debut, date_fin))
-            QMessageBox.information(self, "Recrutement lancé", f"Recrutement {type_recrutement} en cours\nDisponible le {date_fin.strftime('%d/%m/%Y à %H:%M')}\nVous pouvez continuer à jouer ou lancer d'autres actions.")
+            
+            # Message de confirmation avec détails du ciblage
+            message = f"Recrutement {type_recrutement} en cours\n"
+            if ciblage:
+                if "bureau" in ciblage:
+                    message += f"Bureau ciblé : {ciblage['bureau']}\n"
+                if "competences" in ciblage:
+                    message += f"Compétences ciblées : {', '.join(ciblage['competences'])}\n"
+            message += f"\nDisponible le {date_fin.strftime('%d/%m/%Y à %H:%M')}\n"
+            message += "Vous pouvez continuer à jouer ou lancer d'autres actions."
+            QMessageBox.information(self, "Recrutement lancé", message)
         go_btn.clicked.connect(lancer_recrutement)
         dlg.exec_()
 
@@ -739,10 +944,11 @@ class DGSESimGUI(QMainWindow):
             profil = profils[idx]
             bureau_choisi = aff_combo.currentText()
             forcer = bureau_choisi != profil['bureau_ideal']
-            agent, risque = recrutement.valider_recrutement(profil, bureau_choisi, legende_nom_choisi=None, forcer=forcer)
+            type_recrutement = 'cible' if ciblage else 'classique'
+            agent, risque = recrutement.valider_recrutement(profil, bureau_choisi, legende_nom_choisi=None, forcer=forcer, type_recrutement=type_recrutement)
             if agent:
                 self.refresh_agents()
-                QMessageBox.information(self, "Recrutement", f"Agent {agent.nom} {agent.prenom} recruté ({agent.bureau})\n{'Risque accru !' if risque else ''}")
+                QMessageBox.information(self, "Recrutement", f"Agent {agent.nom} {agent.prenom} recruté ({agent.bureau})\n{'Risque accru\u00a0!' if risque else ''}")
                 dlg.accept()
             else:
                 QMessageBox.warning(self, "Erreur recrutement", "Erreur lors du paiement ou ajout agent.")
@@ -845,24 +1051,375 @@ class DGSESimGUI(QMainWindow):
     def refresh_crises_onglet(self):
         self.criseList.clear()
         for c in crises.CRISES:
-            self.criseList.addItem(f"{c.nom} ({c.statut})")
+            # Affichage enrichi avec origine, gravité, pays et progression
+            info_crise = f"{c.nom} - {c.origine} ({c.gravite})"
+            if hasattr(c, 'pays') and c.pays:
+                info_crise += f" - {c.pays.title()}"
+            # Ajouter la progression
+            progression = getattr(c, 'progression', 100)
+            info_crise += f" - {progression:.1f}%"
+            info_crise += f" [{c.statut}]"
+            self.criseList.addItem(info_crise)
 
-    def popup_crise(self, item):
-        idx = self.liste_crises.row(item)
+    # Ancienne fonction popup_crise supprimée - remplacée par popup_crise_onglet
+
+    def _lancer_action_crise(self, crise, dialog):
+        """Lance une action sur la crise sélectionnée"""
+        # Ouvrir le menu de sélection d'actions au lieu de fermer la fenêtre
+        self._lancer_nouvelle_action(crise, dialog)
+
+    def popup_crise_onglet(self, item):
+        """Fenêtre détaillée de crise ouverte depuis l'onglet des crises"""
+        idx = self.criseList.currentRow()
         if idx < 0 or idx >= len(crises.CRISES): return
         c = crises.CRISES[idx]
-        dlg = QMessageBox(self)
-        dlg.setWindowTitle("Crise en cours")
-        dlg.setText(f"{c.nom} - Origine : {c.origine or 'N/A'}")
-        dlg.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
-        dlg.button(QMessageBox.Yes).setText("Action")
-        dlg.button(QMessageBox.Cancel).setText("En attente")
-        res = dlg.exec_()
-        if res == QMessageBox.Yes:
-            c.statut = "Action lancée"
-            crises.modifier_crise(idx, statut="Action lancée")  # optionnel si tu veux maintenir la cohérence
+        
+        # Création d'une fenêtre détaillée avec tableau
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Détails de la crise : {c.nom}")
+        dlg.setGeometry(400, 500, 700, 500)
+        
+        layout = QVBoxLayout(dlg)
+        
+        # Titre
+        titre = QLabel(f"<h2>Crise : {c.nom}</h2>")
+        titre.setAlignment(Qt.AlignCenter)
+        layout.addWidget(titre)
+        
+        # Tableau des détails (en lecture seule)
+        from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem
+        
+        table = QTableWidget()
+        table.setColumnCount(2)
+        table.setHorizontalHeaderLabels(["Propriété", "Valeur"])
+        
+        # Données de la crise
+        donnees = [
+            ("Statut", c.statut),
+            ("Origine", getattr(c, 'origine', 'N/A')),
+            ("Gravité", getattr(c, 'gravite', 'N/A')),
+            ("Pays", getattr(c, 'pays', 'N/A').title() if getattr(c, 'pays', None) else 'N/A'),
+            ("Progression", f"{getattr(c, 'progression', 100):.1f}%"),
+            ("Latitude", f"{getattr(c, 'lat', 0):.4f}"),
+            ("Longitude", f"{getattr(c, 'lon', 0):.4f}"),
+            ("Date début", c.date_debut.strftime("%d/%m/%Y %H:%M") if c.date_debut else 'N/A'),
+            ("Date fin", c.date_fin.strftime("%d/%m/%Y %H:%M") if c.date_fin else 'N/A')
+        ]
+        
+        # Ajout des étapes
+        etapes = getattr(c, 'etapes', [])
+        if etapes:
+            donnees.append(("Étapes", "; ".join(etapes)))
+        else:
+            donnees.append(("Étapes", "Aucune"))
+        
+        # Configuration du tableau
+        table.setRowCount(len(donnees))
+        for i, (propriete, valeur) in enumerate(donnees):
+            table.setItem(i, 0, QTableWidgetItem(propriete))
+            table.setItem(i, 1, QTableWidgetItem(str(valeur)))
+        
+        # Rendre le tableau en lecture seule
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        
+        # Ajuster la largeur des colonnes
+        table.resizeColumnsToContents()
+        layout.addWidget(table)
+        
+        # Section des suspects avec une case par suspect (cliquable)
+        layout.addWidget(QLabel("<b>Suspects :</b>"))
+        suspects_layout = QVBoxLayout()
+        
+        suspects = getattr(c, 'suspects', [])
+        if suspects:
+            for i, suspect in enumerate(suspects, 1):
+                # Créer un bouton cliquable pour chaque suspect
+                suspect_btn = QPushButton(f"Suspect {i} : {suspect}")
+                suspect_btn.setStyleSheet("""
+                    QPushButton {
+                        text-align: left;
+                        padding: 8px;
+                        margin: 2px;
+                        border: 1px solid #ccc;
+                        background-color: #f9f9f9;
+                        border-radius: 4px;
+                    }
+                    QPushButton:hover {
+                        background-color: #e0e0e0;
+                        border-color: #999;
+                    }
+                """)
+                
+                # Connecter le clic à l'ouverture du dossier suspect
+                suspect_btn.clicked.connect(lambda checked, s=suspect, cr=c: self.ouvrir_dossier_suspect(s, cr))
+                suspects_layout.addWidget(suspect_btn)
+        else:
+            no_suspects = QLabel("Aucun suspect identifié")
+            no_suspects.setFrameStyle(QFrame.Box)
+            no_suspects.setStyleSheet("padding: 5px; margin: 2px; border: 1px solid #ccc; background-color: #f9f9f9; color: #666;")
+            suspects_layout.addWidget(no_suspects)
+        
+        layout.addLayout(suspects_layout)
+        
+        # Boutons d'action
+        btn_layout = QHBoxLayout()
+        
+        # Toujours afficher le bouton Lancer Action si la crise n'est pas finie
+        if c.statut in ["En attente", "En cours"]:
+            btn_action = QPushButton("Lancer Action")
+            btn_action.clicked.connect(lambda: self._lancer_action_crise(c, dlg))
+            btn_layout.addWidget(btn_action)
+        
+        btn_fermer = QPushButton("Fermer")
+        btn_fermer.clicked.connect(dlg.accept)
+        btn_layout.addWidget(btn_fermer)
+        
+        layout.addLayout(btn_layout)
+        
+        # Créer le widget d'onglets pour les actions
+        tabs = QTabWidget()
+        
+        # Ajouter un onglet pour les actions
+        actions_widget = QWidget()
+        actions_layout = QVBoxLayout(actions_widget)
+        
+        # Titre des actions
+        actions_layout.addWidget(QLabel("<b>Actions sur cette crise :</b>"))
+        
+        # Liste des actions
+        actions_list = QListWidget()
+        actions_layout.addWidget(actions_list)
+        
+        # Bouton pour lancer une nouvelle action
+        btn_nouvelle_action = QPushButton("Lancer une nouvelle action")
+        btn_nouvelle_action.clicked.connect(lambda: self._lancer_nouvelle_action(c, dlg))
+        actions_layout.addWidget(btn_nouvelle_action)
+        
+        # Bouton pour rafraîchir manuellement
+        btn_refresh = QPushButton("🔄 Actualiser")
+        btn_refresh.clicked.connect(lambda: self._rafraichir_liste_actions(c, actions_list))
+        actions_layout.addWidget(btn_refresh)
+        
+        # Rafraîchir la liste des actions
+        self._rafraichir_liste_actions(c, actions_list)
+        
+        tabs.addTab(actions_widget, "Actions")
+        
+        # Ajouter les onglets au layout principal
+        layout.addWidget(tabs)
+        
+        # Créer un timer pour rafraîchir automatiquement les actions toutes les 2 secondes
+        from PyQt5.QtCore import QTimer
+        refresh_timer = QTimer()
+        refresh_timer.timeout.connect(lambda: self._rafraichir_liste_actions(c, actions_list))
+        refresh_timer.start(2000)  # Rafraîchir toutes les 2 secondes
+        
+        # Connecter la fermeture de la fenêtre à l'arrêt du timer
+        dlg.finished.connect(refresh_timer.stop)
+        
+        dlg.setLayout(layout)
+        dlg.exec_()
+        
+        # Rafraîchir l'affichage après fermeture
         self.refresh_crises()
         self.refresh_crises_onglet()
+
+    def ouvrir_dossier_suspect(self, nom_suspect, crise):
+        """Ouvre le dossier détaillé d'un suspect"""
+        # Vérifier d'abord si la crise est toujours active
+        if crise.statut in ["Réussite", "Échec", "Clôturée"]:
+            QMessageBox.information(self, "Crise terminée", f"Cette crise est terminée ({crise.statut}).\nLes dossiers suspects ont été archivés.")
+            return
+        
+        # Extraire nom et prénom du suspect (format: "Prénom Nom")
+        if ' ' in nom_suspect:
+            prenom, nom = nom_suspect.split(' ', 1)
+        else:
+            prenom, nom = nom_suspect, ""
+        
+        # Rechercher le dossier suspect
+        dossier_id = f"{nom}_{prenom}_{crise.nom}"
+        dossier = dossiers_suspects.get_dossier_suspect(dossier_id)
+        
+        if not dossier:
+            print(f"DEBUG: Recherche dossier suspect avec ID: {dossier_id}")
+            print(f"DEBUG: Suspects dans la crise: {crise.suspects}")
+            # Essayer de lister tous les dossiers pour debug
+            tous_dossiers = dossiers_suspects.lister_tous_dossiers()
+            print(f"DEBUG: Tous les dossiers disponibles: {[d.id for d in tous_dossiers]}")
+            QMessageBox.warning(self, "Dossier introuvable", f"Dossier non trouvé pour {nom_suspect}\nID recherché: {dossier_id}\nCrise: {crise.nom} (Statut: {crise.statut})")
+            return
+        
+        # Créer la fenêtre du dossier suspect
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Dossier suspect : {dossier.prenom} {dossier.nom}")
+        dlg.setGeometry(400, 500, 800, 600)
+        
+        layout = QVBoxLayout(dlg)
+        
+        # Titre
+        titre = QLabel(f"<h2>Dossier suspect : {dossier.prenom} {dossier.nom}</h2>")
+        titre.setAlignment(Qt.AlignCenter)
+        layout.addWidget(titre)
+        
+        # Informations de base
+        from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem
+        
+        info_table = QTableWidget()
+        info_table.setColumnCount(2)
+        info_table.setHorizontalHeaderLabels(["Propriété", "Valeur"])
+        
+        donnees_base = [
+            ("Nom", dossier.nom),
+            ("Prénom", dossier.prenom),
+            ("Pays", dossier.pays),
+            ("Nationalité", dossier.nationalite),
+            ("Âge", str(dossier.age)),
+            ("Métier", dossier.metier),
+            ("Entreprise", dossier.entreprise),
+            ("Adresse", dossier.adresse),
+            ("Téléphone", dossier.telephone),
+            ("Email", dossier.email),
+            ("Date création", dossier.date_creation.strftime("%d/%m/%Y %H:%M")),
+            ("Dernière mise à jour", dossier.derniere_mise_a_jour.strftime("%d/%m/%Y %H:%M"))
+        ]
+        
+        info_table.setRowCount(len(donnees_base))
+        for i, (propriete, valeur) in enumerate(donnees_base):
+            info_table.setItem(i, 0, QTableWidgetItem(propriete))
+            info_table.setItem(i, 1, QTableWidgetItem(str(valeur)))
+        
+        info_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        info_table.resizeColumnsToContents()
+        layout.addWidget(QLabel("<b>Informations de base :</b>"))
+        layout.addWidget(info_table)
+        
+        # Onglets pour les informations détaillées
+        from PyQt5.QtWidgets import QTabWidget
+        
+        tabs = QTabWidget()
+        
+        # Onglet Notes
+        notes_widget = QWidget()
+        notes_layout = QVBoxLayout(notes_widget)
+        if dossier.notes:
+            for note in dossier.notes:
+                note_text = f"[{note['date'].strftime('%d/%m/%Y %H:%M')}] {note['source']} : {note['texte']}"
+                note_label = QLabel(note_text)
+                note_label.setWordWrap(True)
+                note_label.setFrameStyle(QFrame.Box)
+                note_label.setStyleSheet("padding: 5px; margin: 2px; border: 1px solid #ddd; background-color: #f5f5f5;")
+                notes_layout.addWidget(note_label)
+        else:
+            notes_layout.addWidget(QLabel("Aucune note"))
+        tabs.addTab(notes_widget, "Notes")
+        
+        # Onglet Informations recueillies
+        info_widget = QWidget()
+        info_layout = QVBoxLayout(info_widget)
+        if dossier.informations_recueillies:
+            for info in dossier.informations_recueillies:
+                info_text = f"[{info['date'].strftime('%d/%m/%Y %H:%M')}] {info['type']} - {info['source']} : {info['information']}"
+                info_label = QLabel(info_text)
+                info_label.setWordWrap(True)
+                info_label.setFrameStyle(QFrame.Box)
+                info_label.setStyleSheet("padding: 5px; margin: 2px; border: 1px solid #ddd; background-color: #e8f4f8;")
+                info_layout.addWidget(info_label)
+        else:
+            info_layout.addWidget(QLabel("Aucune information recueillie"))
+        tabs.addTab(info_widget, "Informations")
+        
+        # Onglet Surveillances
+        surv_widget = QWidget()
+        surv_layout = QVBoxLayout(surv_widget)
+        if dossier.surveillances:
+            for surv in dossier.surveillances:
+                surv_text = f"[{surv['date'].strftime('%d/%m/%Y %H:%M')}] Lieu: {surv['lieu']}, Durée: {surv['duree']}, Agent: {surv['agent']}, Résultat: {surv['resultat']}"
+                surv_label = QLabel(surv_text)
+                surv_label.setWordWrap(True)
+                surv_label.setFrameStyle(QFrame.Box)
+                surv_label.setStyleSheet("padding: 5px; margin: 2px; border: 1px solid #ddd; background-color: #fff3cd;")
+                surv_layout.addWidget(surv_label)
+        else:
+            surv_layout.addWidget(QLabel("Aucune surveillance effectuée"))
+        tabs.addTab(surv_widget, "Surveillances")
+        
+        # Onglet Interceptions
+        int_widget = QWidget()
+        int_layout = QVBoxLayout(int_widget)
+        if dossier.interceptions:
+            for intc in dossier.interceptions:
+                int_text = f"[{intc['date'].strftime('%d/%m/%Y %H:%M')}] {intc['type']} - {intc['source']} : {intc['contenu']}"
+                int_label = QLabel(int_text)
+                int_label.setWordWrap(True)
+                int_label.setFrameStyle(QFrame.Box)
+                int_label.setStyleSheet("padding: 5px; margin: 2px; border: 1px solid #ddd; background-color: #d1ecf1;")
+                surv_layout.addWidget(int_label)
+        else:
+            int_layout.addWidget(QLabel("Aucune interception"))
+        tabs.addTab(int_widget, "Interceptions")
+        
+        # Onglet Sources humaines
+        src_widget = QWidget()
+        src_layout = QVBoxLayout(src_widget)
+        if dossier.sources_humaines:
+            for src in dossier.sources_humaines:
+                src_text = f"[{src['date'].strftime('%d/%m/%Y %H:%M')}] {src['nom']} (Fiabilité: {src['fiabilite']}) : {src['information']}"
+                src_label = QLabel(src_text)
+                src_label.setWordWrap(True)
+                src_label.setFrameStyle(QFrame.Box)
+                src_label.setStyleSheet("padding: 5px; margin: 2px; border: 1px solid #ddd; background-color: #d4edda;")
+                src_layout.addWidget(src_label)
+        else:
+            src_layout.addWidget(QLabel("Aucune source humaine"))
+        tabs.addTab(src_widget, "Sources humaines")
+        
+        layout.addWidget(tabs)
+        
+        # Boutons d'action
+        btn_layout = QHBoxLayout()
+        
+        # Bouton pour ajouter une note
+        btn_note = QPushButton("Ajouter une note")
+        btn_note.clicked.connect(lambda: self.ajouter_note_suspect(dossier, dlg))
+        btn_layout.addWidget(btn_note)
+        
+        # Bouton pour ajouter une information
+        btn_info = QPushButton("Ajouter information")
+        btn_info.clicked.connect(lambda: self.ajouter_information_suspect(dossier, dlg))
+        btn_layout.addWidget(btn_info)
+        
+        btn_fermer = QPushButton("Fermer")
+        btn_fermer.clicked.connect(dlg.accept)
+        btn_layout.addWidget(btn_fermer)
+        
+        layout.addLayout(btn_layout)
+        
+        dlg.setLayout(layout)
+        dlg.exec_()
+
+    def ajouter_note_suspect(self, dossier, dialog):
+        """Ajoute une note au dossier suspect"""
+        note, ok = QInputDialog.getText(self, "Ajouter une note", "Entrez votre note :")
+        if ok and note:
+            dossier.ajouter_note(note, "Agent")
+            QMessageBox.information(self, "Note ajoutée", "Note ajoutée au dossier suspect")
+            dialog.accept()
+            # Rouvrir le dossier pour montrer la nouvelle note
+            self.ouvrir_dossier_suspect(f"{dossier.prenom} {dossier.nom}", crises.CRISES[0])  # TODO: améliorer
+
+    def ajouter_information_suspect(self, dossier, dialog):
+        """Ajoute une information au dossier suspect"""
+        info, ok = QInputDialog.getText(self, "Ajouter une information", "Entrez l'information recueillie :")
+        if ok and info:
+            type_info, ok2 = QInputDialog.getItem(self, "Type d'information", "Choisissez le type :", 
+                                                ["Général", "Surveillance", "Interception", "Source humaine"], 0, False)
+            if ok2:
+                dossier.ajouter_information(info, type_info, "Agent")
+                QMessageBox.information(self, "Information ajoutée", "Information ajoutée au dossier suspect")
+                dialog.accept()
+                # Rouvrir le dossier pour montrer la nouvelle information
+                self.ouvrir_dossier_suspect(f"{dossier.prenom} {dossier.nom}", crises.CRISES[0])  # TODO: améliorer
 
     def popup_mission(self, item):
         idx = self.liste_missions.row(item)
@@ -888,11 +1445,28 @@ class DGSESimGUI(QMainWindow):
     def refresh_crises(self):
         self.liste_crises.clear()
         for c in crises.lister_crises():
-            couleur = "[VERT]" if c.statut == "Action lancée" else "[ROUGE]"
-            self.liste_crises.addItem(f"{couleur} {c.nom}")
+            # Couleur selon le statut
+            if c.statut == "En cours":
+                couleur = "[🟡]"
+            elif c.statut == "Réussite":
+                couleur = "[🟢]"
+            elif c.statut == "Échec":
+                couleur = "[🔴]"
+            elif c.statut == "En attente":
+                couleur = "[⚪]"
+            else:
+                couleur = "[⚫]"
+            
+            # Affichage enrichi avec origine, pays et progression
+            info_crise = f"{couleur} {c.nom} - {c.origine}"
+            if hasattr(c, 'pays') and c.pays:
+                info_crise += f" ({c.pays.title()})"
+            # Ajouter la progression
+            progression = getattr(c, 'progression', 100)
+            info_crise += f" - {progression:.1f}%"
+            self.liste_crises.addItem(info_crise)
         self.generate_osm_map()
         self.webView.load(QUrl.fromLocalFile(os.path.abspath(self.map_path)))
-        self.liste_crises.addItem(f"{couleur} {c.nom}")
 
     def refresh_missions_accueil(self):
         self.liste_missions.clear()
@@ -920,13 +1494,26 @@ class DGSESimGUI(QMainWindow):
             self.prochaine_mission = self.current_game_time + timedelta(hours=random.randint(1, 10))
 
         if self.current_game_time >= self.prochaine_crise:
-            if len(crises.CRISES) < 2:
-                ville = random.choice(random.choice(list(missions.VILLES_PAR_PAYS.values())))
-                c = crises.Crise(origine="Inconnue", gravite="Élevée", lat=ville['lat'], lon=ville['lon'])
+            # Compter seulement les crises actives (non clôturées)
+            crises_actives = [c for c in crises.CRISES if c.statut != "Clôturée"]
+            
+            if len(crises_actives) < 3:  # Permettre jusqu'à 3 crises actives
+                # Sélection aléatoire d'un pays et d'une ville
+                pays = random.choice(list(missions.VILLES_PAR_PAYS.keys()))
+                ville = random.choice(missions.VILLES_PAR_PAYS[pays])
+                
+                # Création de la crise avec génération automatique des origines et suspects
+                c = crises.Crise(
+                    lat=ville['lat'], 
+                    lon=ville['lon'],
+                    pays=pays  # Le pays sera utilisé pour générer les suspects
+                )
                 c.demarrer(self.current_game_time, random.randint(600, 1440))
                 crises.ajouter_crise(c)
                 self.refresh_crises()
                 self.refresh_crises_onglet()
+                print(f"INFO: Nouvelle crise créée : {c.nom} à {ville['ville']} ({pays})")
+            
             self.prochaine_crise = self.current_game_time + timedelta(hours=random.randint(24, 72))
             
     def popup_creation_reseau(self):
@@ -934,7 +1521,7 @@ class DGSESimGUI(QMainWindow):
         dlg.setWindowTitle("Créer un réseau clandestin")
         layout = QFormLayout(dlg)
 
-        agents_libres = [a for a in agents.AGENTS if not getattr(a, 'rattachement', None) and est_disponible(a)]
+        agents_libres = [a for a in agents.AGENTS if not getattr(a, 'rattachement', None) and a.est_disponible()]
         agent_combo = QComboBox()
         agent_combo.addItems([f"{a.nom} {a.prenom}" for a in agents_libres])
         layout.addRow("Agent :", agent_combo)
@@ -1218,6 +1805,281 @@ class DGSESimGUI(QMainWindow):
         dlg.setLayout(layout)
         dlg.exec_()
 
+    def _voir_actions_en_cours(self):
+        """Affiche toutes les actions en cours sur toutes les crises"""
+        actions_dlg = QDialog(self)
+        actions_dlg.setWindowTitle("Actions en cours sur toutes les crises")
+        actions_dlg.setGeometry(400, 500, 800, 600)
+        
+        layout = QVBoxLayout(actions_dlg)
+        
+        # Titre
+        layout.addWidget(QLabel("<h2>Actions en cours</h2>"))
+        
+        # Liste des actions
+        actions_list = QListWidget()
+        layout.addWidget(actions_list)
+        
+        # Bouton rafraîchir
+        refresh_btn = QPushButton("Rafraîchir")
+        refresh_btn.clicked.connect(lambda: self._rafraichir_actions_globales(actions_list))
+        layout.addWidget(refresh_btn)
+        
+        # Bouton fermer
+        btn_fermer = QPushButton("Fermer")
+        btn_fermer.clicked.connect(actions_dlg.accept)
+        layout.addWidget(btn_fermer)
+        
+        # Charger les actions
+        self._rafraichir_actions_globales(actions_list)
+        
+        actions_dlg.setLayout(layout)
+        actions_dlg.exec_()
+
+    def _rafraichir_actions_globales(self, actions_list):
+        """Rafraîchit la liste globale des actions"""
+        actions_list.clear()
+        
+        try:
+            # Obtenir toutes les actions en cours
+            actions_en_cours = list(gestionnaire_actions.actions_en_cours.values())
+            
+            if not actions_en_cours:
+                actions_list.addItem("Aucune action en cours")
+                return
+            
+            # Grouper par crise
+            actions_par_crise = {}
+            for action in actions_en_cours:
+                if action.crise_id not in actions_par_crise:
+                    actions_par_crise[action.crise_id] = []
+                actions_par_crise[action.crise_id].append(action)
+            
+            # Afficher par crise
+            for crise_id, actions in actions_par_crise.items():
+                actions_list.addItem(f"--- CRISE: {crise_id} ---")
+                
+                for action in actions:
+                    # Calculer le temps restant
+                    temps_restant = ""
+                    if action.date_fin:
+                        temps_restant = f" - Fin dans {int((action.date_fin - datetime.now()).total_seconds() / 60)} min"
+                    
+                    info_action = f"🟡 {action.type_action.value} - Agent: {action.agent_id}"
+                    if action.cible:
+                        info_action += f" - Cible: {action.cible}"
+                    info_action += f" - {action.progression}%{temps_restant}"
+                    
+                    item = QListWidgetItem(info_action)
+                    item.setData(Qt.UserRole, action)
+                    actions_list.addItem(item)
+                
+                actions_list.addItem("")  # Ligne vide entre crises
+            
+        except Exception as e:
+            actions_list.addItem(f"Erreur lors du chargement des actions: {e}")
+
+    def _rafraichir_liste_actions(self, crise, actions_list):
+        """Rafraîchit la liste des actions d'une crise"""
+        actions_list.clear()
+        
+        try:
+            actions = gestionnaire_actions.lister_actions_crise(crise.nom)
+            
+            if not actions:
+                actions_list.addItem("Aucune action lancée sur cette crise")
+                return
+            
+            for action in actions:
+                # Déterminer la couleur selon le statut
+                couleur = ""
+                if action.statut.value == "En cours":
+                    couleur = "[🟡]"
+                elif action.statut.value == "Terminée":
+                    couleur = "[🟢]"
+                elif action.statut.value == "Échec":
+                    couleur = "[🔴]"
+                elif action.statut.value == "Annulée":
+                    couleur = "[⚫]"
+                
+                # Afficher les informations de l'action
+                info_action = f"{couleur} {action.type_action.value}"
+                if action.agent_id:
+                    info_action += f" - Agent: {action.agent_id}"
+                if action.cible:
+                    info_action += f" - Cible: {action.cible}"
+                info_action += f" - {action.statut.value}"
+                
+                if action.statut.value == "En cours":
+                    info_action += f" ({action.progression}%)"
+                elif action.statut.value in ["Terminée", "Échec"]:
+                    info_action += f" - {action.resultat}"
+                
+                item = QListWidgetItem(info_action)
+                item.setData(Qt.UserRole, action)
+                actions_list.addItem(item)
+                
+        except Exception as e:
+            actions_list.addItem(f"Erreur lors du chargement des actions: {e}")
+
+    def _lancer_nouvelle_action(self, crise, dialog):
+        """Lance une nouvelle action sur une crise"""
+        # Créer la fenêtre de sélection d'action
+        action_dlg = QDialog(self)
+        action_dlg.setWindowTitle(f"Lancer une action sur {crise.nom}")
+        action_dlg.setGeometry(400, 500, 600, 400)
+        
+        layout = QVBoxLayout(action_dlg)
+        
+        # Sélection du type d'action
+        layout.addWidget(QLabel("<b>Sélectionnez le type d'action :</b>"))
+        
+        from PyQt5.QtWidgets import QComboBox
+        type_action_combo = QComboBox()
+        for type_action in actions_crises.TypeAction:
+            type_action_combo.addItem(type_action.value)
+        layout.addWidget(type_action_combo)
+        
+        # Sélection de l'agent
+        layout.addWidget(QLabel("<b>Sélectionnez l'agent :</b>"))
+        agent_combo = QComboBox()
+        
+        # Variable pour stocker les agents filtrés
+        agents_filtres = []
+        
+        def filtrer_agents_competents():
+            type_selectionne = type_action_combo.currentText()
+            for type_action in actions_crises.TypeAction:
+                if type_action.value == type_selectionne:
+                    config = actions_crises.ACTIONS_DISPONIBLES[type_action]
+                    competences_requises = [p.replace("competence_", "") for p in config["prerequis"] if p.startswith("competence_")]
+                    
+                    # Filtrer les agents disponibles avec au moins une compétence requise
+                    nonlocal agents_filtres
+                    agents_filtres = []
+                    for a in agents.AGENTS:
+                        if not a.est_disponible():
+                            continue
+                        # Convertir les compétences requises pour la comparaison
+                        comp_requises_normalisees = [c.replace("combat", "combat rapproché").replace("securite", "sécurité") for c in competences_requises]
+                        # Vérifier si l'agent a au moins une des compétences requises
+                        if any(c.lower() in [ac.lower() for ac in a.competences] for c in comp_requises_normalisees):
+                            agents_filtres.append(a)
+                    
+                    agent_combo.clear()
+                    for agent in agents_filtres:
+                        competences_agent = ", ".join(c for c in agent.competences if c.lower() in [cr.replace("combat", "combat rapproché").replace("securite", "sécurité").lower() for cr in competences_requises])
+                        agent_combo.addItem(f"{agent.nom} {agent.prenom} ({agent.bureau}) - {competences_agent}")
+                    break
+        
+        type_action_combo.currentTextChanged.connect(filtrer_agents_competents)
+        filtrer_agents_competents()  # Appliquer le filtre initial
+        layout.addWidget(agent_combo)
+        
+        # Sélection de la cible (suspect)
+        layout.addWidget(QLabel("<b>Sélectionnez la cible (optionnel) :</b>"))
+        cible_combo = QComboBox()
+        cible_combo.addItem("Aucune cible spécifique")
+        if hasattr(crise, 'suspects') and crise.suspects:
+            for suspect in crise.suspects:
+                cible_combo.addItem(suspect)
+        layout.addWidget(cible_combo)
+        
+        # Informations sur l'action sélectionnée
+        info_label = QLabel("Sélectionnez un type d'action pour voir les détails")
+        info_label.setWordWrap(True)
+        info_label.setFrameStyle(QFrame.Box)
+        info_label.setStyleSheet("padding: 10px; background-color: #f0f0f0;")
+        layout.addWidget(info_label)
+        
+        def update_info():
+            type_selectionne = type_action_combo.currentText()
+            for type_action in actions_crises.TypeAction:
+                if type_action.value == type_selectionne:
+                    config = actions_crises.ACTIONS_DISPONIBLES[type_action]
+                    info = f"<b>{type_action.value}</b><br>"
+                    info += f"Coût: {config['cout']}€<br>"
+                    info += f"Durée: {config['duree_minutes']} minutes<br>"
+                    info += f"Description: {config['description']}<br>"
+                    
+                    # Afficher les prérequis de manière plus claire
+                    prerequis = []
+                    for p in config['prerequis']:
+                        if p == "agent_disponible":
+                            prerequis.append("Agent disponible")
+                        elif p.startswith("competence_"):
+                            comp = p.replace("competence_", "").capitalize()
+                            prerequis.append(f"Compétence : {comp}")
+                        elif p.startswith("equipement_"):
+                            equip = p.replace("equipement_", "").capitalize()
+                            prerequis.append(f"Équipement : {equip}")
+                        else:
+                            prerequis.append(p.capitalize())
+                    
+                    info += f"<br><b>Prérequis :</b><br>• " + "<br>• ".join(prerequis)
+                    info += f"<br><br><b>Risques :</b><br>• " + "<br>• ".join(config['risques'])
+                    info += f"<br><br><b>Récompenses :</b><br>• " + "<br>• ".join(config['recompenses'])
+                    info_label.setText(info)
+                    break
+        
+        type_action_combo.currentTextChanged.connect(update_info)
+        update_info()  # Afficher les infos du premier type
+        
+        # Boutons
+        btn_layout = QHBoxLayout()
+        btn_lancer = QPushButton("Lancer l'action")
+        btn_annuler = QPushButton("Annuler")
+        btn_layout.addWidget(btn_lancer)
+        btn_layout.addWidget(btn_annuler)
+        layout.addLayout(btn_layout)
+        
+        def lancer_action():
+            # Récupérer les sélections
+            type_action_str = type_action_combo.currentText()
+            agent_idx = agent_combo.currentIndex()
+            cible_idx = cible_combo.currentIndex()
+            
+            if agent_idx < 0 or agent_idx >= len(agents_filtres):
+                QMessageBox.warning(action_dlg, "Erreur", "Veuillez sélectionner un agent")
+                return
+            
+            # Trouver le type d'action
+            type_action = None
+            for ta in actions_crises.TypeAction:
+                if ta.value == type_action_str:
+                    type_action = ta
+                    break
+            
+            if not type_action:
+                QMessageBox.warning(action_dlg, "Erreur", "Type d'action invalide")
+                return
+            
+            # Récupérer l'agent et la cible
+            agent = agents_filtres[agent_idx]
+            cible = None
+            if cible_idx > 0 and cible_idx <= len(crise.suspects):
+                cible = crise.suspects[cible_idx - 1]
+            
+            # Lancer l'action avec le temps de jeu actuel
+            success, message = gestionnaire_actions.lancer_action(
+                type_action, crise.nom, f"{agent.nom} {agent.prenom}", cible, None, self.current_game_time
+            )
+            
+            if success:
+                QMessageBox.information(action_dlg, "Succès", message)
+                action_dlg.accept()
+                # NE PAS fermer la fenêtre principale - juste rafraîchir la liste des actions
+                # Rafraîchir l'affichage des actions
+                self.refresh_crises()
+                self.refresh_crises_onglet()
+            else:
+                QMessageBox.warning(action_dlg, "Erreur", message)
+        
+        btn_lancer.clicked.connect(lancer_action)
+        btn_annuler.clicked.connect(action_dlg.reject)
+        
+        action_dlg.setLayout(layout)
+        action_dlg.exec_()
 
 
 def run_gui():

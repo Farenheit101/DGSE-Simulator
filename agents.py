@@ -20,6 +20,11 @@ class Agent:
         self.cout_base = cout_base
         self.historique_legendes = historique_legendes if historique_legendes is not None else []
         self.nom_code = nom_code  # <= NOUVEAU
+        
+        # Nouveau système de statuts
+        self.statut = "Disponible"  # Disponible, En mission, Blessé, Disparu, Mort, En repos
+        self.date_debut_statut = None  # Date de début du statut actuel
+        self.raison_statut = ""  # Raison du statut (optionnel)
 
     def add_experience(self, points):
         self.exp += points
@@ -66,6 +71,78 @@ class Agent:
 
     def en_mission(self):
         return any(m for m in self.missions)
+    
+    def est_disponible(self):
+        """Vérifie si l'agent est disponible pour une nouvelle mission"""
+        return self.statut == "Disponible"
+    
+    def changer_statut(self, nouveau_statut, raison="", date_debut=None):
+        """Change le statut de l'agent"""
+        from datetime import datetime
+        
+        ancien_statut = self.statut
+        self.statut = nouveau_statut
+        self.raison_statut = raison
+        
+        if date_debut:
+            self.date_debut_statut = date_debut
+        else:
+            self.date_debut_statut = datetime.now()
+        
+        print(f"INFO: Agent {self.nom} {self.prenom} - Statut changé: {ancien_statut} → {nouveau_statut}")
+        if raison:
+            print(f"      Raison: {raison}")
+    
+    def mettre_en_mission(self, raison="Action lancée"):
+        """Met l'agent en mission"""
+        self.changer_statut("En mission", raison)
+    
+    def terminer_mission(self):
+        """Termine la mission de l'agent et le remet disponible"""
+        if self.statut == "En mission":
+            self.changer_statut("Disponible", "Mission terminée")
+        else:
+            print(f"ATTENTION: Agent {self.nom} {self.prenom} n'était pas en mission (statut: {self.statut})")
+    
+    def mettre_blesse(self, raison="Blessure en mission", duree_jours=7):
+        """Met l'agent blessé pour une durée donnée"""
+        from datetime import datetime, timedelta
+        date_fin = datetime.now() + timedelta(days=duree_jours)
+        self.changer_statut("Blessé", f"{raison} - Retour le {date_fin.strftime('%d/%m/%Y')}")
+    
+    def mettre_disparu(self, raison="Disparition en mission"):
+        """Met l'agent disparu"""
+        self.changer_statut("Disparu", raison)
+    
+    def declarer_mort(self, raison="Mort en mission"):
+        """Déclare l'agent mort"""
+        self.changer_statut("Mort", raison)
+    
+    def mettre_en_repos(self, raison="Repos obligatoire", duree_jours=3):
+        """Met l'agent en repos pour une durée donnée"""
+        from datetime import datetime, timedelta
+        date_fin = datetime.now() + timedelta(days=duree_jours)
+        self.changer_statut("En repos", f"{raison} - Retour le {date_fin.strftime('%d/%m/%Y')}")
+    
+    def verifier_fin_statut(self, current_time):
+        """Vérifie si un statut temporaire doit se terminer"""
+        if self.statut in ["Blessé", "En repos"] and self.date_debut_statut:
+            # Calculer la durée du statut
+            if self.statut == "Blessé":
+                duree_jours = 7  # Blessure: 7 jours
+            elif self.statut == "En repos":
+                duree_jours = 3  # Repos: 3 jours
+            else:
+                return
+            
+            # Vérifier si le temps est écoulé
+            from datetime import timedelta
+            date_fin = self.date_debut_statut + timedelta(days=duree_jours)
+            
+            if current_time >= date_fin:
+                ancien_statut = self.statut
+                self.changer_statut("Disponible", f"Fin du statut: {ancien_statut}")
+                print(f"INFO: Agent {self.nom} {self.prenom} - {ancien_statut} terminé, retour disponible")
 
     def update_position(self, lat, lon):
         self.lat = lat
@@ -95,7 +172,10 @@ class Agent:
             "lat": getattr(self, "lat", 48.85),
             "lon": getattr(self, "lon", 2.35),
             "historique_legendes": self.historique_legendes,
-            "nom_code": self.nom_code
+            "nom_code": self.nom_code,
+            "statut": getattr(self, "statut", "Disponible"),
+            "date_debut_statut": getattr(self, "date_debut_statut", None),
+            "raison_statut": getattr(self, "raison_statut", "")
         }
 
     @staticmethod
@@ -120,6 +200,9 @@ class Agent:
         a.history = data.get("history", [])
         a.lat = data.get("lat", 48.85)
         a.lon = data.get("lon", 2.35)
+        a.statut = data.get("statut", "Disponible")
+        a.date_debut_statut = data.get("date_debut_statut", None)
+        a.raison_statut = data.get("raison_statut", "")
         return a
 
 # ---------- Fonctions utiles agents -----------
@@ -160,9 +243,14 @@ def get_agent_by_nom(nom, prenom):
     return None
 
 def est_disponible(agent):
-    if getattr(agent, "statut", "").lower() in ["repos", "blessé", "mort"]:
-        return False
-    return True
+    """Vérifie si un agent est disponible pour une nouvelle mission"""
+    if hasattr(agent, 'est_disponible'):
+        return agent.est_disponible()
+    else:
+        # Fallback pour la compatibilité
+        if getattr(agent, "statut", "").lower() in ["repos", "blessé", "mort", "disparu", "en mission"]:
+            return False
+        return True
 
 def get_agents():
     return AGENTS
