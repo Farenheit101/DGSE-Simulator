@@ -32,6 +32,7 @@ import villes
 import dossiers_suspects
 import actions_crises
 from gestionnaire_actions import gestionnaire_actions
+import formations
 
 RECRUTEMENTS_EN_COURS = []
 ALERTES_EN_COURS = []
@@ -67,6 +68,7 @@ class DGSESimGUI(QMainWindow):
         self.atlas_widget = atlas.LiveAtlasWidget()
         self.tabs.addTab(self.atlas_widget, "Atlas")
         self.tabs.addTab(self._tab_logistique(), "Logistique")
+        self.tabs.addTab(self._tab_formations(), "Formations")
         self.tabs.addTab(self._tab_cheat(), "Cheat")
 
         self.init_time_system()
@@ -207,6 +209,11 @@ class DGSESimGUI(QMainWindow):
                 gestionnaire_actions.avancer_actions(self.current_game_time)
             except Exception as e:
                 print(f"Erreur lors de l'avancement des actions: {e}")
+            # Finaliser les formations arrivées à échéance
+            try:
+                formations.finaliser_formations(self.current_game_time)
+            except Exception as e:
+                print(f"Erreur finalisation des formations: {e}")
             
             self.process_reseaux_creation()
             
@@ -215,6 +222,9 @@ class DGSESimGUI(QMainWindow):
             # Rafraîchir l'onglet budget si présent
             if hasattr(self, 'refresh_budget_tab'):
                 self.refresh_budget_tab()
+            # Rafraîchir l'onglet formations si présent
+            if hasattr(self, 'refresh_formations_tab'):
+                self.refresh_formations_tab()
 
 
     def process_reseaux_creation(self):
@@ -354,6 +364,8 @@ class DGSESimGUI(QMainWindow):
                 item.setForeground(Qt.darkGreen)
             elif statut == "En mission":
                 item.setForeground(Qt.darkBlue)
+            elif statut == "En formation":
+                item.setForeground(Qt.darkCyan)
             elif statut == "Blessé":
                 item.setForeground(Qt.darkRed)
             elif statut == "Disparu":
@@ -434,6 +446,8 @@ class DGSESimGUI(QMainWindow):
                 item.setForeground(Qt.darkGreen)
             elif statut == "En mission":
                 item.setForeground(Qt.darkBlue)
+            elif statut == "En formation":
+                item.setForeground(Qt.darkCyan)
             elif statut == "Blessé":
                 item.setForeground(Qt.darkRed)
             elif statut == "Disparu":
@@ -685,6 +699,137 @@ class DGSESimGUI(QMainWindow):
         layout.addWidget(moyensList)
         widget.setLayout(layout)
         return widget
+    
+    # ------------------ ONGLET FORMATIONS ------------------
+    def _tab_formations(self):
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("Formations en cours :"))
+        self.formations_list = QListWidget()
+        layout.addWidget(self.formations_list)
+
+        # Actions
+        btn_row = QHBoxLayout()
+        btn_planifier = QPushButton("Planifier une formation")
+        btn_annuler = QPushButton("Annuler la formation sélectionnée")
+        btn_refresh = QPushButton("Rafraîchir")
+        btn_row.addWidget(btn_planifier)
+        btn_row.addWidget(btn_annuler)
+        btn_row.addWidget(btn_refresh)
+        layout.addLayout(btn_row)
+
+        def open_planification():
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Planifier une formation")
+            v = QVBoxLayout(dlg)
+            # Choix agent
+            v.addWidget(QLabel("Sélectionnez l'agent :"))
+            agent_combo = QComboBox()
+            agents_dispos = [a for a in agents.AGENTS if getattr(a, 'est_disponible', lambda: True)()]
+            for a in agents_dispos:
+                agent_combo.addItem(f"{a.nom} {a.prenom} ({a.bureau})")
+            v.addWidget(agent_combo)
+            # Choix formation (filtrée: uniquement compétences universelles/prérequis et NON possédées)
+            v.addWidget(QLabel("Sélectionnez la formation :"))
+            formation_combo = QComboBox()
+            catalogue = formations.lister_formations_catalogue()
+            noms_form = []
+            if agents_dispos:
+                ag0 = agents_dispos[0]
+                owned_lower = {c.lower() for c in getattr(ag0, 'competences', [])}
+                for nom, cfg in catalogue.items():
+                    comp = cfg.get('competences', [])
+                    if not comp:
+                        continue
+                    # Une seule compétence par formation
+                    skill = comp[0]
+                    if skill.lower() not in owned_lower:
+                        noms_form.append(nom)
+            for nom in noms_form:
+                cfg = catalogue[nom]
+                formation_combo.addItem(f"{nom} — {cfg['cout']}€ — {cfg['duree_jours']} j")
+            v.addWidget(formation_combo)
+            # Valider
+            btn_ok = QPushButton("Lancer")
+            v.addWidget(btn_ok)
+
+            def do_launch():
+                if not agents_dispos:
+                    QMessageBox.warning(dlg, "Aucun agent", "Aucun agent disponible.")
+                    return
+                ag = agents_dispos[agent_combo.currentIndex()]
+                # Filtrer en fonction de l'agent réellement choisi (pour éviter d'offrir une compétence déjà acquise)
+                owned_lower = {c.lower() for c in getattr(ag, 'competences', [])}
+                valid_names = [n for n in catalogue.keys() if catalogue[n]['competences'] and catalogue[n]['competences'][0].lower() not in owned_lower]
+                if not valid_names:
+                    QMessageBox.information(dlg, "Aucune formation", "Cet agent possède déjà toutes les compétences proposées.")
+                    return
+                # Reconstruction de noms_form pour l'agent sélectionné
+                noms_form_agent = [n for n in noms_form if n in valid_names]
+                if not noms_form_agent:
+                    # Si l'UI n'est plus synchronisée, retomber sur valid_names
+                    noms_form_agent = valid_names
+                idx_form = max(0, min(formation_combo.currentIndex(), len(noms_form_agent)-1))
+                nom = noms_form_agent[idx_form]
+                ok, msg = formations.planifier_formation(ag, nom, self.current_game_time)
+                if ok:
+                    QMessageBox.information(dlg, "Formation", msg)
+                    dlg.accept()
+                    self.refresh_formations_tab()
+                    # Mettre à jour budget
+                    if hasattr(self, 'refresh_budget_tab'):
+                        self.refresh_budget_tab()
+                    # Rafraîchir agents
+                    if hasattr(self, 'agentList'):
+                        self.refresh_agents()
+                else:
+                    QMessageBox.warning(dlg, "Erreur", msg)
+
+            btn_ok.clicked.connect(do_launch)
+            dlg.setLayout(v)
+            dlg.exec_()
+
+        def do_cancel():
+            idx = self.formations_list.currentRow()
+            if idx < 0:
+                return
+            ok, msg = formations.annuler_formation(idx)
+            if ok:
+                QMessageBox.information(self, "Formation", msg)
+                self.refresh_formations_tab()
+                if hasattr(self, 'refresh_budget_tab'):
+                    self.refresh_budget_tab()
+                if hasattr(self, 'agentList'):
+                    self.refresh_agents()
+            else:
+                QMessageBox.warning(self, "Erreur", msg)
+
+        def do_refresh():
+            self.refresh_formations_tab()
+
+        btn_planifier.clicked.connect(open_planification)
+        btn_annuler.clicked.connect(do_cancel)
+        btn_refresh.clicked.connect(do_refresh)
+
+        # Premier chargement
+        self.refresh_formations_tab()
+        widget.setLayout(layout)
+        return widget
+
+    def refresh_formations_tab(self):
+        try:
+            self.formations_list.clear()
+            for f in formations.lister_formations_en_cours():
+                ag = f.get('agent')
+                nom = f.get('nom_formation')
+                statut = f.get('statut')
+                fin = f.get('date_fin')
+                fin_txt = fin.strftime('%d/%m/%Y %H:%M') if fin else 'N/A'
+                self.formations_list.addItem(
+                    f"{nom} — {ag.nom} {ag.prenom} — {statut} — fin: {fin_txt}"
+                )
+        except Exception as e:
+            print(f"Erreur refresh_formations_tab: {e}")
     # --- Double clic agent : ouvre fiche (dossier complet) ---
     def ouvrir_fiche_agent(self, item):
         idx = self.agentList.row(item)
@@ -703,6 +848,11 @@ class DGSESimGUI(QMainWindow):
                 "Légende nom": agent.legende_nom or "Aucune",
                 "Légende temporaire": str(agent.legende_temp) if agent.legende_temp else "Aucune"
             })
+        # Mettre à jour dynamiquement les compétences avant affichage
+        try:
+            fiches.ajouter_info_fiche(fiche_id, "Compétences", ", ".join(agent.competences))
+        except Exception:
+            pass
         fiche = fiches.get_fiche(fiche_id)
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Dossier agent {agent.nom} {agent.prenom}" + (f" (Code: {agent.nom_code})" if agent.nom_code else ""))
@@ -744,7 +894,7 @@ class DGSESimGUI(QMainWindow):
                 for leg in agent.historique_legendes[:5]:
                     txt = f"{leg.get('nom', '')} {leg.get('prenom', '')} / {leg.get('pays', '')} / {leg.get('couverture', '')}"
                     choix_leg.addItem(txt)
-                vbox.addWidget(QLabel("Choisissez une ancienne légende à réassigner :"))
+                vbox.addWidget(QLabel("Choisissez une ancienne légende à réassigner :"))
                 vbox.addWidget(choix_leg)
                 valider_btn = QPushButton("Valider reprise")
                 vbox.addWidget(valider_btn)
@@ -1019,7 +1169,7 @@ class DGSESimGUI(QMainWindow):
             layout.addWidget(radio)
         aff_combo = QComboBox()
         aff_combo.addItems([b['code'] for b in bureaux.BUREAUX])
-        layout.addWidget(QLabel("Affectation proposée (modifiez à vos risques) :"))
+        layout.addWidget(QLabel("Affectation proposée (modifiez à vos risques) :"))
         layout.addWidget(aff_combo)
         valider_btn = QPushButton("Valider recrutement")
         layout.addWidget(valider_btn)
@@ -1161,9 +1311,110 @@ class DGSESimGUI(QMainWindow):
         if idx < 0 or idx >= len(crises.CRISES): return
         c = crises.CRISES[idx]
         
+        # Si la crise est en attente, afficher d'abord le bouton "Gérer crise"
+        if c.statut == "En attente":
+            self.popup_crise_initiale(c)
+            return
+        
+        # Sinon, afficher la fenêtre complète (crise déjà en cours)
+        self.popup_crise_complete(c)
+    
+    def popup_crise_initiale(self, c):
+        """Fenêtre initiale avec bouton 'Gérer crise' pour activer la crise"""
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Activation de la crise : {c.nom}")
+        dlg.setGeometry(300, 200, 500, 300)
+        
+        layout = QVBoxLayout(dlg)
+        
+        # Titre
+        titre = QLabel(f"<h2>Crise : {c.nom}</h2>")
+        titre.setAlignment(Qt.AlignCenter)
+        layout.addWidget(titre)
+        
+        # Informations de base
+        info_label = QLabel(f"""
+        <b>Statut :</b> {c.statut}<br>
+        <b>Origine :</b> {getattr(c, 'origine', 'N/A')}<br>
+        <b>Gravité :</b> {getattr(c, 'gravite', 'N/A')}<br>
+        <b>Pays :</b> {getattr(c, 'pays', 'N/A').title() if getattr(c, 'pays', None) else 'N/A'}<br>
+        <b>Progression :</b> {getattr(c, 'progression', 100):.1f}%
+        """)
+        info_label.setStyleSheet("padding: 20px; background-color: #f9f9f9; border-radius: 8px;")
+        layout.addWidget(info_label)
+        
+        # Avertissement sur la dégradation
+        warning_label = QLabel("⚠️ <b>Attention :</b> Une fois activée, cette crise commencera à se dégrader naturellement avec le temps.")
+        warning_label.setStyleSheet("color: #d32f2f; padding: 15px; background-color: #ffebee; border-radius: 8px; border: 1px solid #f44336;")
+        layout.addWidget(warning_label)
+        
+        # Boutons
+        btn_layout = QHBoxLayout()
+        
+        btn_gerer = QPushButton("🚨 Gérer cette crise")
+        btn_gerer.setStyleSheet("""
+            QPushButton {
+                background-color: #d32f2f;
+                color: white;
+                font-weight: bold;
+                padding: 12px 24px;
+                border-radius: 6px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #b71c1c;
+            }
+        """)
+        btn_gerer.clicked.connect(lambda: self.activer_crise(c, dlg))
+        btn_layout.addWidget(btn_gerer)
+        
+        btn_fermer = QPushButton("Fermer")
+        btn_fermer.clicked.connect(dlg.accept)
+        btn_layout.addWidget(btn_fermer)
+        
+        layout.addLayout(btn_layout)
+        
+        dlg.setLayout(layout)
+        dlg.exec_()
+    
+    def activer_crise(self, c, dialog):
+        """Active une crise et ouvre la fenêtre de gestion complète"""
+        from datetime import datetime, timedelta
+        
+        # Activer la crise
+        c.statut = "En cours"
+        c.actions_lancees = True
+        
+        # Réduire la progression à 98% pour permettre la dégradation
+        c.progression = 98
+        
+        # Démarrer la crise si pas encore fait
+        if not c.date_debut:
+            c.demarrer(self.current_game_time, random.randint(600, 1440))  # 10-24h
+        
+        # Définir la date de dernière action au temps de jeu actuel
+        # Cela permettra à la dégradation naturelle de fonctionner normalement
+        c.derniere_action_date = self.current_game_time
+        
+        # Appliquer une dégradation immédiate symbolique (1% pour montrer que ça commence)
+        c.progression = max(0, c.progression - 1)
+        
+        print(f"INFO: Crise {c.nom} activée et passée en statut 'En cours'")
+        print(f"INFO: Progression réduite à 98% puis à 97% pour montrer la dégradation")
+        print(f"INFO: Progression finale: {c.progression:.1f}%")
+        print(f"INFO: La dégradation naturelle continue maintenant avec le temps de jeu")
+        
+        # Fermer la fenêtre d'activation
+        dialog.accept()
+        
+        # Ouvrir la fenêtre de gestion complète
+        self.popup_crise_complete(c)
+    
+    def popup_crise_complete(self, c):
+        """Fenêtre complète de gestion de crise (après activation)"""
         # Création d'une fenêtre détaillée avec tableau
         dlg = QDialog(self)
-        dlg.setWindowTitle(f"Détails de la crise : {c.nom}")
+        dlg.setWindowTitle(f"Gestion de la crise : {c.nom}")
         dlg.setGeometry(400, 500, 700, 500)
         
         layout = QVBoxLayout(dlg)
@@ -1237,16 +1488,44 @@ class DGSESimGUI(QMainWindow):
                     }
                 """)
                 
-                # Connecter le clic à l'ouverture du dossier suspect
-                suspect_btn.clicked.connect(lambda checked, s=suspect, cr=c: self.ouvrir_dossier_suspect(s, cr))
+                # Connecter le bouton à l'ouverture du dossier suspect
+                suspect_btn.clicked.connect(lambda checked, s=suspect: self.ouvrir_dossier_suspect(s, c))
                 suspects_layout.addWidget(suspect_btn)
         else:
-            no_suspects = QLabel("Aucun suspect identifié")
-            no_suspects.setFrameStyle(QFrame.Box)
-            no_suspects.setStyleSheet("padding: 5px; margin: 2px; border: 1px solid #ccc; background-color: #f9f9f9; color: #666;")
-            suspects_layout.addWidget(no_suspects)
+            suspects_layout.addWidget(QLabel("Aucun suspect identifié"))
         
         layout.addLayout(suspects_layout)
+        
+        # Section des agents avec bonus réseau
+        if hasattr(c, 'pays') and c.pays:
+            layout.addWidget(QLabel("<b>Agents avec bonus réseau dans ce pays :</b>"))
+            try:
+                from gestionnaire_actions import gestionnaire_actions
+                agents_bonus = gestionnaire_actions.lister_agents_avec_bonus_reseau(c.pays)
+                
+                # Filtrer seulement les agents avec bonus > 0
+                agents_avec_bonus = [item for item in agents_bonus if item["bonus_info"]["bonus"] > 0]
+                
+                if agents_avec_bonus:
+                    bonus_layout = QVBoxLayout()
+                    for item in agents_avec_bonus:
+                        agent = item["agent"]
+                        bonus_info = item["bonus_info"]
+                        nom_complet = f"{agent.nom} {agent.prenom}"
+                        
+                        # Agent avec bonus (on sait qu'il en a un car on a filtré)
+                        bonus_text = f"🎯 {nom_complet} ({agent.bureau}) - +{bonus_info['bonus']}% - {bonus_info['description']}"
+                        bonus_label = QLabel(bonus_text)
+                        bonus_label.setStyleSheet("color: #2E8B57; font-weight: bold; padding: 5px; background-color: #f0fff0; border: 1px solid #90EE90; border-radius: 4px;")
+                        bonus_layout.addWidget(bonus_label)
+                    
+                    layout.addLayout(bonus_layout)
+                else:
+                    layout.addWidget(QLabel("Aucun agent avec bonus réseau dans ce pays"))
+            except ImportError:
+                layout.addWidget(QLabel("Impossible de charger les informations de bonus réseau"))
+        else:
+            layout.addWidget(QLabel("Pays non spécifié - impossible de vérifier les bonus réseau"))
         
         # Boutons d'action
         btn_layout = QHBoxLayout()
@@ -1863,7 +2142,7 @@ class DGSESimGUI(QMainWindow):
             secteurs = sorted(set([v["secteur"] for v in metiers.METIERS.values()]))
             combo_secteurs = QComboBox()
             combo_secteurs.addItems(secteurs)
-            vbox.addWidget(QLabel("Choisissez un secteur d’activité :"))
+            vbox.addWidget(QLabel("Choisissez un secteur d'activité :"))
             vbox.addWidget(combo_secteurs)
 
             valider = QPushButton("Lancer la recherche")
@@ -2056,7 +2335,19 @@ class DGSESimGUI(QMainWindow):
                     agent_combo.clear()
                     for agent in agents_filtres:
                         competences_agent = ", ".join(c for c in agent.competences if c.lower() in [cr.replace("combat", "combat rapproché").replace("securite", "sécurité").lower() for cr in competences_requises])
-                        agent_combo.addItem(f"{agent.nom} {agent.prenom} ({agent.bureau}) - {competences_agent}")
+                        
+                        # Vérifier le bonus réseau de l'agent
+                        bonus_reseau = ""
+                        try:
+                            from gestionnaire_actions import gestionnaire_actions
+                            bonus_info = gestionnaire_actions.obtenir_bonus_reseau_agent(f"{agent.nom} {agent.prenom}", crise.pays)
+                            if bonus_info["bonus"] > 0:
+                                type_bonus = "responsable" if bonus_info["type"] == "responsable" else "membre"
+                                bonus_reseau = f" | 🎯 Réseau: +{bonus_info['bonus']}% ({type_bonus})"
+                        except:
+                            pass
+                        
+                        agent_combo.addItem(f"{agent.nom} {agent.prenom} ({agent.bureau}) - {competences_agent}{bonus_reseau}")
                     break
         
         type_action_combo.currentTextChanged.connect(filtrer_agents_competents)

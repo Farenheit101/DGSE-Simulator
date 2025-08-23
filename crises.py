@@ -67,7 +67,7 @@ class Crise:
         self.pays = pays  # Nouveau : pays de la crise
         
         # Système d'avancement de la crise
-        self.progression = 100  # Commence à 100%
+        self.progression = 99  # Commence à 99% pour permettre la dégradation
         self.derniere_action_date = None  # Date de la dernière action
         self.actions_lancees = False  # Si au moins une action a été lancée
         
@@ -116,8 +116,9 @@ class Crise:
             try:
                 import budget
                 bonus_reputation, bonus_argent = self._calculer_bonus_reussite()
-                budget.crediter(bonus_argent, f"Bonus réputation - succès crise {self.nom}")
-                print(f"INFO: Crise {self.nom} réussie! Bonus: {bonus_reputation}€ réputation, {bonus_argent}€ argent")
+                budget.crediter(bonus_argent, f"Bonus argent - succès crise {self.nom}")
+                budget.ajouter_reputation_service(bonus_reputation)
+                print(f"INFO: Crise {self.nom} réussie! Bonus: +{bonus_reputation} réputation, +{bonus_argent}€ argent")
             except ImportError:
                 pass
                 
@@ -141,8 +142,8 @@ class Crise:
             try:
                 import budget
                 malus_reputation = self._calculer_malus_reputation()
-                budget.crediter(-malus_reputation, f"Malus réputation - échec crise {self.nom}")
-                print(f"INFO: Malus réputation appliqué: {malus_reputation}€")
+                budget.ajouter_reputation_service(-malus_reputation)
+                print(f"INFO: Malus réputation appliqué: -{malus_reputation} réputation")
             except ImportError:
                 pass
                 
@@ -188,11 +189,11 @@ class Crise:
     def _calculer_taux_degradation_journaliere(self):
         """Calcule le taux de dégradation journalière selon la gravité"""
         taux_degradation = {
-            "Faible": 1,
-            "Modérée": 2,
-            "Élevée": 3,
-            "Critique": 5,
-            "Maximale": 10
+            "Faible": 4,
+            "Modérée": 5,
+            "Élevée": 8,
+            "Critique": 10,
+            "Maximale": 20
         }
         return taux_degradation.get(self.gravite, 2)
     

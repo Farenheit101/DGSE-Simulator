@@ -601,7 +601,7 @@ VILLES_PAR_PAYS.update({
         {"ville": "Wuhan", "lat": 30.5928, "lon": 114.3055},
         {"ville": "Chengdu", "lat": 30.5728, "lon": 104.0668},
         {"ville": "Hangzhou", "lat": 30.2741, "lon": 120.1551},
-        {"ville": "Xi’an", "lat": 34.3416, "lon": 108.9398},
+        {"ville": "Xi'an", "lat": 34.3416, "lon": 108.9398},
         {"ville": "Nankin", "lat": 32.0603, "lon": 118.7969},
         {"ville": "Shenyang", "lat": 41.8057, "lon": 123.4315},
         {"ville": "Harbin", "lat": 45.8038, "lon": 126.5349},
@@ -763,7 +763,7 @@ VILLES_PAR_PAYS.update({
         {"ville": "Abha", "lat": 18.2164, "lon": 42.5053},
         {"ville": "Al Qatif", "lat": 26.5600, "lon": 49.9800},
         {"ville": "Jubail", "lat": 27.0040, "lon": 49.6460},
-        {"ville": "Ta’if", "lat": 21.4373, "lon": 40.5127},
+        {"ville": "Ta'if", "lat": 21.4373, "lon": 40.5127},
         {"ville": "Yanbu", "lat": 24.0947, "lon": 38.0493},
         {"ville": "Arar", "lat": 30.9753, "lon": 41.0385},
         {"ville": "Sakakah", "lat": 29.9697, "lon": 40.2064},
@@ -1095,4 +1095,121 @@ VILLES_PAR_PAYS.update({
         {"ville": "Karakol", "lat": 42.4907, "lon": 78.3936},
         {"ville": "Tokmok", "lat": 42.8419, "lon": 75.3015}
     ],
+})
+VILLES_PAR_PAYS.update({
+    "egypte": [
+        {"ville": "Le Caire", "lat": 30.0444, "lon": 31.2357},
+        {"ville": "Alexandrie", "lat": 31.2001, "lon": 29.9187},
+        {"ville": "Gizeh", "lat": 30.0131, "lon": 31.2089},
+        {"ville": "Shubra El Kheima", "lat": 30.1229, "lon": 31.2425},
+        {"ville": "Port-Saïd", "lat": 31.2667, "lon": 32.3000},
+        {"ville": "Suez", "lat": 29.9667, "lon": 32.5500},
+        {"ville": "Louxor", "lat": 25.6969, "lon": 32.6422},
+        {"ville": "Mansourah", "lat": 31.0500, "lon": 31.3833},
+        {"ville": "El-Mahalla El-Kubra", "lat": 30.9700, "lon": 31.1600},
+        {"ville": "Assiout", "lat": 27.1833, "lon": 31.1833},
+        {"ville": "Tanta", "lat": 30.7833, "lon": 31.0000},
+        {"ville": "Ismaïlia", "lat": 30.5833, "lon": 32.2667},
+        {"ville": "Fayoum", "lat": 29.3083, "lon": 30.8442},
+        {"ville": "Zagazig", "lat": 30.5833, "lon": 31.5000},
+        {"ville": "Assouan", "lat": 24.0889, "lon": 32.8997},
+        {"ville": "Damiette", "lat": 31.4167, "lon": 31.8167},
+        {"ville": "El-Arich", "lat": 31.1333, "lon": 33.8000},
+        {"ville": "Hurghada", "lat": 27.2578, "lon": 33.8117},
+        {"ville": "Charm el-Cheikh", "lat": 27.9158, "lon": 34.3300}
+    ],
+    "afrique du sud": [
+        {"ville": "Johannesburg", "lat": -26.2041, "lon": 28.0473},
+        {"ville": "Le Cap", "lat": -33.9249, "lon": 18.4241},
+        {"ville": "Durban", "lat": -29.8587, "lon": 31.0218},
+        {"ville": "Pretoria", "lat": -25.7461, "lon": 28.1881},
+        {"ville": "Port Elizabeth", "lat": -33.7139, "lon": 25.5207},
+        {"ville": "Bloemfontein", "lat": -29.0852, "lon": 26.1596},
+        {"ville": "East London", "lat": -33.0292, "lon": 27.8546},
+        {"ville": "Kimberley", "lat": -28.7282, "lon": 24.7499},
+        {"ville": "Nelspruit", "lat": -25.4753, "lon": 30.9694},
+        {"ville": "Polokwane", "lat": -23.9045, "lon": 29.4688}
+    ],
+    "nigeria": [
+        {"ville": "Lagos", "lat": 6.5244, "lon": 3.3792},
+        {"ville": "Kano", "lat": 11.9914, "lon": 8.5317},
+        {"ville": "Ibadan", "lat": 7.3964, "lon": 3.8969},
+        {"ville": "Kaduna", "lat": 10.5222, "lon": 7.4384},
+        {"ville": "Port Harcourt", "lat": 4.8156, "lon": 7.0498},
+        {"ville": "Maiduguri", "lat": 11.8333, "lon": 13.1500},
+        {"ville": "Jos", "lat": 9.8965, "lon": 8.8583},
+        {"ville": "Ilorin", "lat": 8.5000, "lon": 4.5500},
+        {"ville": "Abuja", "lat": 9.0765, "lon": 7.3986},
+        {"ville": "Zaria", "lat": 11.0667, "lon": 7.7000}
+    ],
+    "sénégal": [
+        {"ville": "Dakar", "lat": 14.7167, "lon": -17.4677},
+        {"ville": "Pikine", "lat": 14.7500, "lon": -17.4000},
+        {"ville": "Touba", "lat": 14.8667, "lon": -15.8833},
+        {"ville": "Thiès", "lat": 14.7833, "lon": -16.9167},
+        {"ville": "Kaolack", "lat": 14.1500, "lon": -16.0833}
+    ],
+    "côte d'ivoire": [
+        {"ville": "Abidjan", "lat": 5.3600, "lon": -4.0083},
+        {"ville": "Bouaké", "lat": 7.6833, "lon": -5.0333},
+        {"ville": "San-Pédro", "lat": 4.7500, "lon": -6.6333},
+        {"ville": "Yamoussoukro", "lat": 6.8167, "lon": -5.2833},
+        {"ville": "Korhogo", "lat": 9.4500, "lon": -5.6333}
+    ],
+    "mali": [
+        {"ville": "Bamako", "lat": 12.6500, "lon": -8.0000},
+        {"ville": "Sikasso", "lat": 11.3167, "lon": -5.6667},
+        {"ville": "Mopti", "lat": 14.4833, "lon": -4.1833},
+        {"ville": "Ségou", "lat": 13.4500, "lon": -6.2667},
+        {"ville": "Gao", "lat": 16.2667, "lon": -0.0500}
+    ],
+    "rd congo": [
+        {"ville": "Kinshasa", "lat": -4.4419, "lon": 15.2663},
+        {"ville": "Lubumbashi", "lat": -11.6647, "lon": 27.4793},
+        {"ville": "Mbuji-Mayi", "lat": -6.1500, "lon": 23.6000},
+        {"ville": "Kananga", "lat": -5.9000, "lon": 22.4000},
+        {"ville": "Kisangani", "lat": 0.5167, "lon": 25.2000}
+    ],
+    "kenya": [
+        {"ville": "Nairobi", "lat": -1.2921, "lon": 36.8219},
+        {"ville": "Mombasa", "lat": -4.0435, "lon": 39.6682},
+        {"ville": "Kisumu", "lat": -0.1000, "lon": 34.7500},
+        {"ville": "Nakuru", "lat": -0.3000, "lon": 36.0667},
+        {"ville": "Eldoret", "lat": 0.5167, "lon": 35.2833}
+    ],
+    "éthiopie": [
+        {"ville": "Addis-Abeba", "lat": 9.0320, "lon": 38.7636},
+        {"ville": "Dire Dawa", "lat": 9.6000, "lon": 41.8667},
+        {"ville": "Mekele", "lat": 13.5000, "lon": 39.4667},
+        {"ville": "Gondar", "lat": 12.6000, "lon": 37.4667},
+        {"ville": "Adama", "lat": 8.5500, "lon": 39.2667}
+    ],
+    "cuba": [
+        {"ville": "La Havane", "lat": 23.1136, "lon": -82.3666},
+        {"ville": "Santiago de Cuba", "lat": 20.0217, "lon": -75.8294},
+        {"ville": "Camagüey", "lat": 21.3833, "lon": -77.9167},
+        {"ville": "Holguín", "lat": 20.8833, "lon": -76.2500},
+        {"ville": "Santa Clara", "lat": 22.4000, "lon": -79.9667}
+    ],
+    "vénézuela": [
+        {"ville": "Caracas", "lat": 10.4806, "lon": -66.9036},
+        {"ville": "Maracaibo", "lat": 10.6333, "lon": -71.6333},
+        {"ville": "Valencia", "lat": 10.1667, "lon": -67.9833},
+        {"ville": "Barquisimeto", "lat": 10.0667, "lon": -69.3333},
+        {"ville": "Maracay", "lat": 10.2333, "lon": -67.6000}
+    ],
+    "chili": [
+        {"ville": "Santiago", "lat": -33.4489, "lon": -70.6693},
+        {"ville": "Valparaíso", "lat": -33.0500, "lon": -71.6167},
+        {"ville": "Concepción", "lat": -36.8333, "lon": -73.0500},
+        {"ville": "La Serena", "lat": -29.9000, "lon": -71.2500},
+        {"ville": "Antofagasta", "lat": -23.6500, "lon": -70.4000}
+    ],
+    "pérou": [
+        {"ville": "Lima", "lat": -12.0433, "lon": -77.0283},
+        {"ville": "Arequipa", "lat": -16.3989, "lon": -71.5350},
+        {"ville": "Trujillo", "lat": -8.1167, "lon": -79.0333},
+        {"ville": "Chiclayo", "lat": -6.7760, "lon": -79.8442},
+        {"ville": "Piura", "lat": -5.2000, "lon": -80.6333}
+    ]
 })
