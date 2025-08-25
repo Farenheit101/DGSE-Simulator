@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget,
     QTabWidget, QHBoxLayout, QListWidget, QMessageBox, QInputDialog, QComboBox,
-    QDialog, QRadioButton, QButtonGroup, QCheckBox, QListWidgetItem, QFrame, QDialogButtonBox, QFormLayout, QProgressBar
+    QDialog, QRadioButton, QButtonGroup, QCheckBox, QListWidgetItem, QFrame, QDialogButtonBox, QFormLayout, QProgressBar,
+    QGroupBox, QSpinBox
 )
 from PyQt5.QtCore import QUrl, QTimer, Qt
 from PyQt5.QtWebEngineWidgets import QWebEngineView
@@ -23,12 +24,12 @@ import agences
 import metiers
 import noms
 import langues
+import villes
 import services_francais
 import fiches
 import reseaux
 import atlas
 import logistique
-import villes
 import dossiers_suspects
 import actions_crises
 from gestionnaire_actions import gestionnaire_actions
@@ -396,24 +397,8 @@ class DGSESimGUI(QMainWindow):
         for reseau_nom, lst in par_reseau.items():
             self.sourceList.addItem(f"--- {reseau_nom} ---")
             for s in lst:
-                metier = getattr(s, 'metier', getattr(s, 'infos', {}).get('metier', 'N/A'))
+                metier = getattr(s, 'metier', 'N/A')
                 item = QListWidgetItem(f"{s.nom} ({metier})")
-                item.setData(Qt.UserRole, s)
-                self.sourceList.addItem(item)
-
-        self.sourceList.clear()
-        par_reseau = {}
-        for s in sources.SOURCES:
-            try:
-                reseau = s.rattachement or "Non rattachée"
-            except AttributeError:
-                reseau = "Non rattachée"
-            par_reseau.setdefault(reseau, []).append(s)
-
-        for reseau_nom, lst in par_reseau.items():
-            self.sourceList.addItem(f"--- {reseau_nom} ---")
-            for s in lst:
-                item = QListWidgetItem(f"{s.nom} ({s.infos.get('metier', 'N/A')})")
                 item.setData(Qt.UserRole, s)
                 self.sourceList.addItem(item)
 
@@ -507,7 +492,8 @@ class DGSESimGUI(QMainWindow):
         for reseau_nom, lst in par_reseau.items():
             self.sourceList.addItem(f"--- {reseau_nom} ---")
             for s in lst:
-                item = QListWidgetItem(f"{s.nom} ({s.infos.get('metier', 'N/A')})")
+                metier = getattr(s, 'metier', 'N/A')
+                item = QListWidgetItem(f"{s.nom} ({metier})")
                 item.setData(Qt.UserRole, s)
                 self.sourceList.addItem(item)
 
@@ -702,119 +688,316 @@ class DGSESimGUI(QMainWindow):
     
     # ------------------ ONGLET FORMATIONS ------------------
     def _tab_formations(self):
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Formations en cours :"))
+        """Onglet des formations"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Titre
+        layout.addWidget(QLabel("<h2>Formations</h2>"))
+        
+        # Section Formations de Compétences
+        comp_group = QGroupBox("Formations de Compétences")
+        comp_layout = QVBoxLayout(comp_group)
+        
+        # Liste des formations de compétences
+        comp_list = QListWidget()
+        comp_layout.addWidget(comp_list)
+        
+        # Bouton pour ouvrir la planification des formations de compétences
+        btn_planifier_comp = QPushButton("Planifier une formation de compétence")
+        btn_planifier_comp.clicked.connect(self._ouvrir_planification_competence)
+        comp_layout.addWidget(btn_planifier_comp)
+        
+        layout.addWidget(comp_group)
+        
+        # Section Formations Linguistiques (NOUVEAU)
+        lang_group = QGroupBox("Formations Linguistiques")
+        lang_layout = QVBoxLayout(lang_group)
+        
+        # Liste des formations linguistiques
+        lang_list = QListWidget()
+        lang_layout.addWidget(lang_list)
+        
+        # Bouton pour ouvrir la planification des formations linguistiques
+        btn_planifier_lang = QPushButton("Planifier une formation linguistique")
+        btn_planifier_lang.clicked.connect(self._ouvrir_planification_langue)
+        lang_layout.addWidget(btn_planifier_lang)
+        
+        layout.addWidget(lang_group)
+        
+        # Section Formations en cours
+        en_cours_group = QGroupBox("Formations en cours")
+        en_cours_layout = QVBoxLayout(en_cours_group)
+        
+        # Liste des formations en cours
         self.formations_list = QListWidget()
-        layout.addWidget(self.formations_list)
-
-        # Actions
-        btn_row = QHBoxLayout()
-        btn_planifier = QPushButton("Planifier une formation")
-        btn_annuler = QPushButton("Annuler la formation sélectionnée")
+        en_cours_layout.addWidget(self.formations_list)
+        
+        # Boutons de gestion
         btn_refresh = QPushButton("Rafraîchir")
-        btn_row.addWidget(btn_planifier)
-        btn_row.addWidget(btn_annuler)
-        btn_row.addWidget(btn_refresh)
-        layout.addLayout(btn_row)
-
-        def open_planification():
-            dlg = QDialog(self)
-            dlg.setWindowTitle("Planifier une formation")
-            v = QVBoxLayout(dlg)
-            # Choix agent
-            v.addWidget(QLabel("Sélectionnez l'agent :"))
-            agent_combo = QComboBox()
-            agents_dispos = [a for a in agents.AGENTS if getattr(a, 'est_disponible', lambda: True)()]
-            for a in agents_dispos:
-                agent_combo.addItem(f"{a.nom} {a.prenom} ({a.bureau})")
-            v.addWidget(agent_combo)
-            # Choix formation (filtrée: uniquement compétences universelles/prérequis et NON possédées)
-            v.addWidget(QLabel("Sélectionnez la formation :"))
-            formation_combo = QComboBox()
-            catalogue = formations.lister_formations_catalogue()
-            noms_form = []
-            if agents_dispos:
-                ag0 = agents_dispos[0]
-                owned_lower = {c.lower() for c in getattr(ag0, 'competences', [])}
-                for nom, cfg in catalogue.items():
-                    comp = cfg.get('competences', [])
-                    if not comp:
-                        continue
-                    # Une seule compétence par formation
-                    skill = comp[0]
-                    if skill.lower() not in owned_lower:
-                        noms_form.append(nom)
-            for nom in noms_form:
-                cfg = catalogue[nom]
-                formation_combo.addItem(f"{nom} — {cfg['cout']}€ — {cfg['duree_jours']} j")
-            v.addWidget(formation_combo)
-            # Valider
-            btn_ok = QPushButton("Lancer")
-            v.addWidget(btn_ok)
-
-            def do_launch():
-                if not agents_dispos:
-                    QMessageBox.warning(dlg, "Aucun agent", "Aucun agent disponible.")
-                    return
-                ag = agents_dispos[agent_combo.currentIndex()]
-                # Filtrer en fonction de l'agent réellement choisi (pour éviter d'offrir une compétence déjà acquise)
-                owned_lower = {c.lower() for c in getattr(ag, 'competences', [])}
-                valid_names = [n for n in catalogue.keys() if catalogue[n]['competences'] and catalogue[n]['competences'][0].lower() not in owned_lower]
-                if not valid_names:
-                    QMessageBox.information(dlg, "Aucune formation", "Cet agent possède déjà toutes les compétences proposées.")
-                    return
-                # Reconstruction de noms_form pour l'agent sélectionné
-                noms_form_agent = [n for n in noms_form if n in valid_names]
-                if not noms_form_agent:
-                    # Si l'UI n'est plus synchronisée, retomber sur valid_names
-                    noms_form_agent = valid_names
-                idx_form = max(0, min(formation_combo.currentIndex(), len(noms_form_agent)-1))
-                nom = noms_form_agent[idx_form]
-                ok, msg = formations.planifier_formation(ag, nom, self.current_game_time)
-                if ok:
-                    QMessageBox.information(dlg, "Formation", msg)
-                    dlg.accept()
-                    self.refresh_formations_tab()
-                    # Mettre à jour budget
-                    if hasattr(self, 'refresh_budget_tab'):
-                        self.refresh_budget_tab()
-                    # Rafraîchir agents
-                    if hasattr(self, 'agentList'):
-                        self.refresh_agents()
-                else:
-                    QMessageBox.warning(dlg, "Erreur", msg)
-
-            btn_ok.clicked.connect(do_launch)
-            dlg.setLayout(v)
-            dlg.exec_()
-
-        def do_cancel():
-            idx = self.formations_list.currentRow()
-            if idx < 0:
-                return
-            ok, msg = formations.annuler_formation(idx)
-            if ok:
-                QMessageBox.information(self, "Formation", msg)
-                self.refresh_formations_tab()
-                if hasattr(self, 'refresh_budget_tab'):
-                    self.refresh_budget_tab()
-                if hasattr(self, 'agentList'):
-                    self.refresh_agents()
-            else:
-                QMessageBox.warning(self, "Erreur", msg)
-
-        def do_refresh():
-            self.refresh_formations_tab()
-
-        btn_planifier.clicked.connect(open_planification)
-        btn_annuler.clicked.connect(do_cancel)
-        btn_refresh.clicked.connect(do_refresh)
-
-        # Premier chargement
+        btn_refresh.clicked.connect(lambda: self.refresh_formations_tab())
+        en_cours_layout.addWidget(btn_refresh)
+        
+        layout.addWidget(en_cours_group)
+        
+        # Charger les données
         self.refresh_formations_tab()
-        widget.setLayout(layout)
-        return widget
+        
+        return tab
+
+    def _ouvrir_planification_competence(self):
+        """Ouvre la planification des formations de compétences"""
+        try:
+            from formations import lister_formations_catalogue
+            
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Planifier une formation de compétence")
+            dlg.setGeometry(400, 500, 600, 500)
+            
+            layout = QVBoxLayout(dlg)
+            
+            # Sélection de l'agent
+            layout.addWidget(QLabel("<b>Sélectionnez un agent :</b>"))
+            agent_combo = QComboBox()
+            agents_disponibles = [a for a in agents.AGENTS if a.est_disponible()]
+            for agent in agents_disponibles:
+                agent_combo.addItem(f"{agent.nom} {agent.prenom} ({agent.bureau})", agent)
+            layout.addWidget(agent_combo)
+            
+            if not agents_disponibles:
+                layout.addWidget(QLabel("Aucun agent disponible pour la formation"))
+                btn_fermer = QPushButton("Fermer")
+                btn_fermer.clicked.connect(dlg.accept)
+                layout.addWidget(btn_fermer)
+                dlg.setLayout(layout)
+                dlg.exec_()
+                return
+            
+            # Sélection de la formation
+            layout.addWidget(QLabel("<b>Sélectionnez une formation :</b>"))
+            formation_combo = QComboBox()
+            formations = lister_formations_catalogue()
+            for nom, config in formations.items():
+                formation_combo.addItem(f"{nom} - {config['cout']}€ - {config['duree_jours']} jours", nom)
+            layout.addWidget(formation_combo)
+            
+            # Informations sur la formation
+            info_label = QLabel("Sélectionnez une formation pour voir les détails")
+            info_label.setWordWrap(True)
+            layout.addWidget(info_label)
+            
+            def update_info():
+                nom_formation = formation_combo.currentData()
+                if nom_formation and nom_formation in formations:
+                    config = formations[nom_formation]
+                    info = f"<b>Formation : {nom_formation}</b><br>"
+                    info += f"• Coût : {config['cout']}€<br>"
+                    info += f"• Durée : {config['duree_jours']} jours<br>"
+                    info += f"• Compétence acquise : {', '.join(config['competences'])}"
+                    info_label.setText(info)
+                else:
+                    info_label.setText("Sélectionnez une formation pour voir les détails")
+            
+            formation_combo.currentTextChanged.connect(update_info)
+            update_info()
+            
+            # Boutons
+            buttons_layout = QHBoxLayout()
+            
+            btn_planifier = QPushButton("Planifier la formation")
+            btn_planifier.clicked.connect(lambda: self._planifier_formation_competence(
+                agent_combo.currentData(),
+                formation_combo.currentData(),
+                dlg
+            ))
+            buttons_layout.addWidget(btn_planifier)
+            
+            btn_fermer = QPushButton("Fermer")
+            btn_fermer.clicked.connect(dlg.accept)
+            buttons_layout.addWidget(btn_fermer)
+            
+            layout.addLayout(buttons_layout)
+            
+            dlg.setLayout(layout)
+            dlg.exec_()
+            
+        except ImportError:
+            QMessageBox.warning(self, "Erreur", "Module formations non disponible")
+
+    def _ouvrir_planification_langue(self):
+        """Ouvre la planification des formations linguistiques"""
+        try:
+            from formations import lister_formations_langues_catalogue
+            
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Planifier une formation linguistique")
+            dlg.setGeometry(400, 500, 600, 500)
+            
+            layout = QVBoxLayout(dlg)
+            
+            # Sélection de l'agent
+            layout.addWidget(QLabel("<b>Sélectionnez un agent :</b>"))
+            agent_combo = QComboBox()
+            agents_disponibles = [a for a in agents.AGENTS if a.est_disponible()]
+            for agent in agents_disponibles:
+                # Afficher le nombre de langues actuelles
+                nb_langues = len(getattr(agent, 'langues', []))
+                agent_combo.addItem(f"{agent.nom} {agent.prenom} ({agent.bureau}) - {nb_langues}/5 langues", agent)
+            layout.addWidget(agent_combo)
+            
+            if not agents_disponibles:
+                layout.addWidget(QLabel("Aucun agent disponible pour la formation"))
+                btn_fermer = QPushButton("Fermer")
+                btn_fermer.clicked.connect(dlg.accept)
+                layout.addWidget(btn_fermer)
+                dlg.setLayout(layout)
+                dlg.exec_()
+                return
+            
+            # Sélection de la langue
+            layout.addWidget(QLabel("<b>Sélectionnez une langue à apprendre :</b>"))
+            langue_combo = QComboBox()
+            formations_langues = lister_formations_langues_catalogue()
+            
+            # Filtrer les langues que l'agent ne maîtrise pas déjà
+            agent_selectionne = agents_disponibles[0] if agents_disponibles else None
+            langues_agent = getattr(agent_selectionne, 'langues', []) if agent_selectionne else []
+            
+            for nom, config in formations_langues.items():
+                langue = config['langue']
+                if langue.lower() not in [l.lower() for l in langues_agent]:
+                    difficulte = config['difficulte']
+                    couleur = "#2E8B57" if difficulte == "facile" else "#FF8C00" if difficulte == "moyenne" else "#DC143C"
+                    langue_combo.addItem(f"{langue.title()} - {config['cout']}€ - {config['duree_jours']} jours - {difficulte}", nom)
+                else:
+                    langue_combo.addItem(f"{langue.title()} - DÉJÀ MAÎTRISÉE", nom)
+                    # Désactiver cette option
+                    langue_combo.setItemData(langue_combo.count() - 1, None, Qt.UserRole)
+            
+            layout.addWidget(langue_combo)
+            
+            # Mettre à jour la liste quand l'agent change
+            def update_langues_agent():
+                agent = agent_combo.currentData()
+                if agent:
+                    langues_agent = getattr(agent, 'langues', [])
+                    langue_combo.clear()
+                    
+                    for nom, config in formations_langues.items():
+                        langue = config['langue']
+                        if langue.lower() not in [l.lower() for l in langues_agent]:
+                            difficulte = config['difficulte']
+                            couleur = "#2E8B57" if difficulte == "facile" else "#FF8C00" if difficulte == "moyenne" else "#DC143C"
+                            langue_combo.addItem(f"{langue.title()} - {config['cout']}€ - {config['duree_jours']} jours - {difficulte}", nom)
+                        else:
+                            langue_combo.addItem(f"{langue.title()} - DÉJÀ MAÎTRISÉE", nom)
+                            langue_combo.setItemData(langue_combo.count() - 1, None, Qt.UserRole)
+            
+            agent_combo.currentTextChanged.connect(update_langues_agent)
+            
+            # Informations sur la formation
+            info_label = QLabel("Sélectionnez une langue pour voir les détails")
+            info_label.setWordWrap(True)
+            layout.addWidget(info_label)
+            
+            def update_info():
+                nom_formation = langue_combo.currentData()
+                if nom_formation and nom_formation in formations_langues:
+                    config = formations_langues[nom_formation]
+                    langue = config['langue']
+                    difficulte = config['difficulte']
+                    
+                    info = f"<b>Formation linguistique : {langue.title()}</b><br>"
+                    info += f"• Coût : {config['cout']}€<br>"
+                    info += f"• Durée : {config['duree_jours']} jours<br>"
+                    info += f"• Difficulté : {difficulte}<br>"
+                    info += f"• Langue acquise : {langue.title()}"
+                    
+                    # Afficher la difficulté avec une couleur
+                    if difficulte == "facile":
+                        info += "<br><span style='color: #2E8B57;'>• Langue facile à apprendre</span>"
+                    elif difficulte == "moyenne":
+                        info += "<br><span style='color: #FF8C00;'>• Langue de difficulté moyenne</span>"
+                    else:
+                        info += "<br><span style='color: #DC143C;'>• Langue difficile à apprendre</span>"
+                    
+                    info_label.setText(info)
+                else:
+                    info_label.setText("Sélectionnez une langue pour voir les détails")
+            
+            langue_combo.currentTextChanged.connect(update_info)
+            update_info()
+            
+            # Boutons
+            buttons_layout = QHBoxLayout()
+            
+            btn_planifier = QPushButton("Planifier la formation")
+            btn_planifier.clicked.connect(lambda: self._planifier_formation_langue(
+                agent_combo.currentData(),
+                langue_combo.currentData(),
+                dlg
+            ))
+            buttons_layout.addWidget(btn_planifier)
+            
+            btn_fermer = QPushButton("Fermer")
+            btn_fermer.clicked.connect(dlg.accept)
+            buttons_layout.addWidget(btn_fermer)
+            
+            layout.addLayout(buttons_layout)
+            
+            dlg.setLayout(layout)
+            dlg.exec_()
+            
+        except ImportError:
+            QMessageBox.warning(self, "Erreur", "Module formations non disponible")
+
+    def _planifier_formation_competence(self, agent, nom_formation, parent_dialog):
+        """Planifie une formation de compétence"""
+        try:
+            from formations import planifier_formation
+            
+            if not agent or not nom_formation:
+                QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un agent et une formation")
+                return
+            
+            succes, message = planifier_formation(agent, nom_formation, self.current_game_time)
+            
+            if succes:
+                QMessageBox.information(self, "Formation planifiée", message)
+                parent_dialog.accept()
+                self.refresh_formations_tab()
+            else:
+                QMessageBox.warning(self, "Erreur", message)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de la planification : {str(e)}")
+
+    def _planifier_formation_langue(self, agent, nom_formation, parent_dialog):
+        """Planifie une formation linguistique"""
+        try:
+            from formations import planifier_formation
+            
+            if not agent or not nom_formation:
+                QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un agent et une langue")
+                return
+            
+            # Vérifier la limite de langues
+            nb_langues = len(getattr(agent, 'langues', []))
+            if nb_langues >= 5:
+                QMessageBox.warning(self, "Limite atteinte", f"L'agent maîtrise déjà {nb_langues}/5 langues")
+                return
+            
+            succes, message = planifier_formation(agent, nom_formation, self.current_game_time)
+            
+            if succes:
+                QMessageBox.information(self, "Formation linguistique planifiée", message)
+                parent_dialog.accept()
+                self.refresh_formations_tab()
+            else:
+                QMessageBox.warning(self, "Erreur", message)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de la planification : {str(e)}")
 
     def refresh_formations_tab(self):
         try:
@@ -848,9 +1031,10 @@ class DGSESimGUI(QMainWindow):
                 "Légende nom": agent.legende_nom or "Aucune",
                 "Légende temporaire": str(agent.legende_temp) if agent.legende_temp else "Aucune"
             })
-        # Mettre à jour dynamiquement les compétences avant affichage
+        # Mettre à jour dynamiquement les compétences et langues avant affichage
         try:
             fiches.ajouter_info_fiche(fiche_id, "Compétences", ", ".join(agent.competences))
+            fiches.ajouter_info_fiche(fiche_id, "Langues", ", ".join(agent.langues))
         except Exception:
             pass
         fiche = fiches.get_fiche(fiche_id)
@@ -1000,184 +1184,312 @@ class DGSESimGUI(QMainWindow):
 
     # --- RECRUTEMENT ASYNC AVEC DÉLAI INGAME ---
     def open_recrutement_wizard_async(self):
+        """Ouvre l'assistant de recrutement en mode asynchrone"""
         dlg = QDialog(self)
-        dlg.setWindowTitle("Recrutement d'agent - Sélectionnez le mode")
+        dlg.setWindowTitle("Assistant de Recrutement")
+        dlg.setGeometry(400, 500, 600, 700)
+        
         layout = QVBoxLayout(dlg)
-        radio_alea = QRadioButton("Recrutement aléatoire (rapide, peu exigeant) — 2000 €")
-        radio_cible = QRadioButton("Recrutement ciblé — 5000 €")
-        radio_alea.setChecked(True)
-        group = QButtonGroup(dlg)
-        group.addButton(radio_alea)
-        group.addButton(radio_cible)
-        layout.addWidget(radio_alea)
-        layout.addWidget(radio_cible)
-        layout.addWidget(QLabel(" "))
         
-        # Critères de ciblage
-        criteres_frame = QWidget()
-        criteres_layout = QVBoxLayout(criteres_frame)
+        # Titre
+        layout.addWidget(QLabel("<h2>Assistant de Recrutement</h2>"))
         
-        # Options de ciblage
-        criteres_layout.addWidget(QLabel("<b>Type de ciblage :</b>"))
-        radio_bureau = QRadioButton("Par bureau uniquement")
-        radio_competences = QRadioButton("Par compétences uniquement")
-        radio_mixte = QRadioButton("Par bureau ET compétences")
-        radio_bureau.setChecked(True)
+        # Section 1: Type de recrutement
+        layout.addWidget(QLabel("<b>1. Type de recrutement</b>"))
+        type_combo = QComboBox()
+        type_combo.addItems(["Classique", "Ciblé"])
+        layout.addWidget(type_combo)
         
-        group_ciblage = QButtonGroup(criteres_frame)
-        group_ciblage.addButton(radio_bureau)
-        group_ciblage.addButton(radio_competences)
-        group_ciblage.addButton(radio_mixte)
+        # Section 2: Ciblage
+        ciblage_group = QGroupBox("2. Ciblage (optionnel)")
+        ciblage_layout = QFormLayout(ciblage_group)
         
-        criteres_layout.addWidget(radio_bureau)
-        criteres_layout.addWidget(radio_competences)
-        criteres_layout.addWidget(radio_mixte)
-        criteres_layout.addWidget(QLabel(" "))
-        
-        # Sélection du bureau
-        bureau_frame = QWidget()
-        bureau_layout = QVBoxLayout(bureau_frame)
-        bureau_layout.addWidget(QLabel("<b>Bureau souhaité :</b>"))
+        # Bureau
         bureau_combo = QComboBox()
-        bureau_combo.addItems([b['code'] for b in bureaux.BUREAUX])
-        bureau_layout.addWidget(bureau_combo)
-        criteres_layout.addWidget(bureau_frame)
+        bureau_combo.addItem("Aucun", None)
+        for b in bureaux.BUREAUX:
+            bureau_combo.addItem(f"{b['nom']} ({b['code']})", b['code'])
+        ciblage_layout.addRow("Bureau:", bureau_combo)
         
-        # Sélection des compétences
-        comp_frame = QWidget()
-        comp_layout = QVBoxLayout(comp_frame)
-        comp_layout.addWidget(QLabel("<b>Compétences souhaitées :</b>"))
-        comp_boxes = []
-        for c in ["Infiltration", "Surveillance", "Hacking", "Langues étrangères", 
-                 "Négociation", "Combat rapproché", "Crypto", "Conduite", "Déguisement",
-                 "Analyse", "Technique", "Sécurité", "Gestion", "Recherche"]:
-            box = QCheckBox(c)
-            comp_boxes.append(box)
-            comp_layout.addWidget(box)
-        criteres_layout.addWidget(comp_frame)
+        # Compétences
+        competences_combo = QComboBox()
+        competences_combo.addItem("Aucune", None)
+        competences_liste = ["Infiltration", "Hacking", "Surveillance", "Combat rapproché", "Négociation", "Analyse", "Sécurité"]
+        for comp in competences_liste:
+            competences_combo.addItem(comp, comp)
+        ciblage_layout.addRow("Compétence:", competences_combo)
         
-        layout.addWidget(criteres_frame)
+        # Pays
+        pays_combo = QComboBox()
+        pays_combo.addItem("Aucun", None)
+        for pays in sorted(villes.VILLES_PAR_PAYS.keys()):
+            pays_combo.addItem(pays.title(), pays)
+        ciblage_layout.addRow("Pays:", pays_combo)
         
-        # Activer/désactiver les sections selon le type de recrutement
-        def update_sections():
-            is_cible = radio_cible.isChecked()
-            criteres_frame.setEnabled(is_cible)
-            
-            # Activer/désactiver selon le type de ciblage
-            if is_cible:
-                bureau_frame.setEnabled(radio_bureau.isChecked() or radio_mixte.isChecked())
-                comp_frame.setEnabled(radio_competences.isChecked() or radio_mixte.isChecked())
-            else:
-                bureau_frame.setEnabled(False)
-                comp_frame.setEnabled(False)
+        # Langue (NOUVEAU) - Import de la source unique
+        from langues import obtenir_toutes_langues
+        langue_combo = QComboBox()
+        langue_combo.addItem("Aucune", None)
+        langues_disponibles = obtenir_toutes_langues()
+        for langue in langues_disponibles:
+            langue_combo.addItem(langue.title(), langue)
+        ciblage_layout.addRow("Langue:", langue_combo)
         
-        radio_cible.toggled.connect(update_sections)
-        radio_bureau.toggled.connect(update_sections)
-        radio_competences.toggled.connect(update_sections)
-        radio_mixte.toggled.connect(update_sections)
-        update_sections()
-        go_btn = QPushButton("Lancer recrutement")
-        layout.addWidget(go_btn)
-        result_lbl = QLabel("")
-        layout.addWidget(result_lbl)
-        def lancer_recrutement():
-            result_lbl.setText("Recrutement en cours... (délai ingame)")
-            
-            if radio_alea.isChecked():
-                type_recrutement = "classique"
-                duree_jours = 2
-                ciblage = None
-            else:
-                type_recrutement = "cible"
-                duree_jours = 5
-                ciblage = {}
-                
-                # Vérifier le type de ciblage
-                if radio_bureau.isChecked():
-                    # Ciblage par bureau uniquement
-                    if bureau_combo.currentText():
-                        ciblage["bureau"] = bureau_combo.currentText()
-                    else:
-                        QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un bureau.")
-                        return
-                
-                elif radio_competences.isChecked():
-                    # Ciblage par compétences uniquement
-                    comp_select = [box.text() for box in comp_boxes if box.isChecked()]
-                    if comp_select:
-                        ciblage["competences"] = comp_select
-                    else:
-                        QMessageBox.warning(self, "Erreur", "Veuillez sélectionner au moins une compétence.")
-                        return
-                
-                elif radio_mixte.isChecked():
-                    # Ciblage mixte (bureau + compétences)
-                    if not bureau_combo.currentText():
-                        QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un bureau.")
-                        return
-                    comp_select = [box.text() for box in comp_boxes if box.isChecked()]
-                    if not comp_select:
-                        QMessageBox.warning(self, "Erreur", "Veuillez sélectionner au moins une compétence.")
-                        return
-                    ciblage["bureau"] = bureau_combo.currentText()
-                    ciblage["competences"] = comp_select
-            
-            dlg.accept()
-            date_debut = self.current_game_time
-            date_fin = date_debut + timedelta(days=duree_jours)
-            # Débiter le coût au lancement selon le système actif
+        layout.addWidget(ciblage_group)
+        
+        # Section 3: Informations de ciblage (nombre d'agents fixé à 1)
+        info_label = QLabel("Sélectionnez des critères de ciblage pour voir les informations")
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("QLabel { color: #666; font-style: italic; }")
+        layout.addWidget(info_label)
+        
+        def update_info():
             try:
-                cout = budget.cout_recrutement_mode(type_recrutement)
-                if not budget.debiter(cout, f"Recrutement {type_recrutement} lancé"):
-                    QMessageBox.warning(self, "Budget insuffisant", f"Solde insuffisant pour payer {cout} €")
-                    return
+                # Récupérer les critères sélectionnés
+                bureau = bureau_combo.currentData()
+                competence = competences_combo.currentData()
+                pays = pays_combo.currentData()
+                langue = langue_combo.currentData()
+                
+                # Construire le ciblage
+                ciblage = {}
+                if bureau:
+                    ciblage["bureau"] = bureau
+                if competence:
+                    ciblage["competences"] = [competence]
+                if pays:
+                    ciblage["pays"] = pays
+                if langue:
+                    ciblage["langue"] = langue
+                
+                if ciblage:
+                    # Afficher les informations de ciblage
+                    info = "<b>Critères de ciblage sélectionnés :</b><br>"
+                    if bureau:
+                        info += f"• Bureau : {bureau}<br>"
+                    if competence:
+                        info += f"• Compétence : {competence}<br>"
+                    if pays:
+                        info += f"• Pays : {pays}<br>"
+                    if langue:
+                        info += f"• Langue : {langue}<br>"
+                    
+                    # Informations sur le coût
+                    if type_combo.currentText() == "Ciblé":
+                        info += "<br><b>Coût estimé :</b> 5000€ par agent (recrutement ciblé)"
+                    else:
+                        info += "<br><b>Coût estimé :</b> 2000€ par agent (recrutement classique)"
+                    
+                    info_label.setStyleSheet("QLabel { color: #2E8B57; font-weight: bold; }")
+                else:
+                    info = "Sélectionnez des critères de ciblage pour voir les informations"
+                    info_label.setStyleSheet("QLabel { color: #666; font-style: italic; }")
+                
+                info_label.setText(info)
+                
             except Exception as e:
-                print(f"Erreur débit recrutement: {e}")
-            # Rafraîchir affichages budget
-            self.update_status_labels()
-            if hasattr(self, 'refresh_budget_tab'):
-                self.refresh_budget_tab()
-            RECRUTEMENTS_EN_COURS.append(RecrutementEnCours(type_recrutement, ciblage, date_debut, date_fin))
-            
-            # Message de confirmation avec détails du ciblage
-            message = f"Recrutement {type_recrutement} en cours\n"
-            if ciblage:
-                if "bureau" in ciblage:
-                    message += f"Bureau ciblé : {ciblage['bureau']}\n"
-                if "competences" in ciblage:
-                    message += f"Compétences ciblées : {', '.join(ciblage['competences'])}\n"
-            message += f"\nDisponible le {date_fin.strftime('%d/%m/%Y à %H:%M')}\n"
-            message += "Vous pouvez continuer à jouer ou lancer d'autres actions."
-            QMessageBox.information(self, "Recrutement lancé", message)
-        go_btn.clicked.connect(lancer_recrutement)
+                info_label.setText(f"Erreur lors de la mise à jour des informations : {str(e)}")
+                info_label.setStyleSheet("QLabel { color: #DC143C; }")
+        
+        # Fonction pour activer/désactiver les options de ciblage
+        def toggle_ciblage_options():
+            if type_combo.currentText() == "Classique":
+                ciblage_group.setEnabled(False)
+                # Réinitialiser les sélections
+                bureau_combo.setCurrentIndex(0)
+                competences_combo.setCurrentIndex(0)
+                pays_combo.setCurrentIndex(0)
+                langue_combo.setCurrentIndex(0)
+            else:
+                ciblage_group.setEnabled(True)
+            update_info()
+        
+        # Connecter les changements pour mettre à jour les informations
+        type_combo.currentTextChanged.connect(toggle_ciblage_options)
+        bureau_combo.currentTextChanged.connect(update_info)
+        competences_combo.currentTextChanged.connect(update_info)
+        pays_combo.currentTextChanged.connect(update_info)
+        langue_combo.currentTextChanged.connect(update_info)
+        
+        # Initialiser l'état des options de ciblage
+        toggle_ciblage_options()
+        
+        # Boutons
+        buttons_layout = QHBoxLayout()
+        
+        lancer_btn = QPushButton("Lancer le recrutement")
+        lancer_btn.clicked.connect(lambda: self._lancer_recrutement_cible(
+            type_combo.currentText(),
+            bureau_combo.currentData(),
+            competences_combo.currentData(),
+            pays_combo.currentData(),
+            langue_combo.currentData(),
+            1,  # Nombre d'agents fixé à 1
+            dlg
+        ))
+        buttons_layout.addWidget(lancer_btn)
+        
+        btn_fermer = QPushButton("Fermer")
+        btn_fermer.clicked.connect(dlg.accept)
+        buttons_layout.addWidget(btn_fermer)
+        
+        layout.addLayout(buttons_layout)
+        
+        dlg.setLayout(layout)
         dlg.exec_()
 
+    def _lancer_recrutement_cible(self, type_recrutement, bureau, competence, pays, langue, nb_agents, parent_dialog):
+        """Lance le recrutement avec les critères de ciblage"""
+        try:
+            # Construire le ciblage
+            ciblage = {}
+            if bureau:
+                ciblage["bureau"] = bureau
+            if competence:
+                ciblage["competences"] = [competence]
+            if pays:
+                ciblage["pays"] = pays
+            if langue:
+                ciblage["langue"] = langue
+            
+            # Lancer le recrutement
+            duree = random.randint(5, 15)
+            date_debut = self.current_game_time
+            date_fin = date_debut + timedelta(days=duree)
+            
+            # Déterminer le type de recrutement
+            if type_recrutement == "Classique":
+                type_final = "classique"
+            else:
+                type_final = "cible"
+            
+            # Ajouter à la liste des recrutements en cours
+            RECRUTEMENTS_EN_COURS.append(RecrutementEnCours(
+                type_final, ciblage, date_debut, date_fin
+            ))
+            
+            # Message de confirmation
+            message = f"Recrutement d'un agent lancé avec succès !<br><br>"
+            if ciblage:
+                message += "<b>Critères de ciblage :</b><br>"
+                if bureau:
+                    message += f"• Bureau : {bureau}<br>"
+                if competence:
+                    message += f"• Compétence : {competence}<br>"
+                if pays:
+                    message += f"• Pays : {pays}<br>"
+                if langue:
+                    message += f"• Langue : {langue}<br>"
+                message += f"<br><b>Résultats attendus dans {duree} jours ingame.</b>"
+            else:
+                message += f"<b>Recrutement classique - Résultats attendus dans {duree} jours ingame.</b>"
+            
+            QMessageBox.information(self, "Recrutement lancé", message)
+            parent_dialog.accept()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors du lancement du recrutement : {str(e)}")
+
     def popup_selection_profil(self, ciblage):
+        # Générer 3 profils pour donner le choix
         profils = recrutement.generer_profils(3, ciblage)
+        if not profils:
+            QMessageBox.warning(self, "Erreur", "Aucun profil disponible.")
+            return
+        
         dlg = QDialog(self)
-        dlg.setWindowTitle("Sélection du profil recruté")
+        dlg.setWindowTitle("Sélection de l'agent recruté")
+        dlg.setGeometry(300, 200, 800, 700)
         layout = QVBoxLayout(dlg)
+        
+        # Titre
+        layout.addWidget(QLabel("<h3>Choisissez un agent à recruter</h3>"))
+        
+        # Groupe de boutons radio pour les profils
         choix_box = QButtonGroup(dlg)
+        
         for i, profil in enumerate(profils):
-            s = f"{profil['nom']} {profil['prenom']} - Pays: {profil['pays']}\n"
-            s += f"Métier assigné : {profil['metier']} chez {profil['entreprise']}\n"
-            s += f"Bureau idéal : {profil['bureau_ideal']} - Prix : {profil['cout']}€\n"
-            s += f"Compétences universelles : {', '.join(profil['comp_univ'])}\n"
-            s += f"Compétences métiers : {', '.join(profil['comp_metier'])}\n"
-            radio = QRadioButton(s)
+            # Créer un frame pour chaque profil
+            frame = QFrame()
+            frame.setFrameStyle(QFrame.Box)
+            frame.setStyleSheet("QFrame { border: 2px solid #ddd; margin: 5px; padding: 10px; }")
+            frame_layout = QVBoxLayout(frame)
+            
+            # Radio button
+            radio = QRadioButton()
+            if i == 0:  # Présélectionner le premier profil
+                radio.setChecked(True)
             choix_box.addButton(radio, i)
-            layout.addWidget(radio)
+            
+            # Informations du profil
+            info_text = f"<b>{profil['nom']} {profil['prenom']}</b> - {profil['pays'].title()}<br>"
+            info_text += f"<b>Métier :</b> {profil['metier']} chez {profil['entreprise']}<br>"
+            info_text += f"<b>Bureau idéal :</b> {profil['bureau_ideal']} - <b>Prix :</b> {profil['cout']}€<br>"
+            
+            # AFFICHAGE DES LANGUES
+            if 'langues' in profil and profil['langues']:
+                langues_str = ', '.join([l.title() for l in profil['langues']])
+                info_text += f"<b>Langues :</b> {langues_str}<br>"
+            
+            # Compétences
+            if profil['comp_univ']:
+                info_text += f"<b>Compétences universelles :</b> {', '.join(profil['comp_univ'])}<br>"
+            if profil['comp_metier']:
+                info_text += f"<b>Compétences métiers :</b> {', '.join(profil['comp_metier'])}"
+            
+            # Layout horizontal pour radio + info
+            profil_layout = QHBoxLayout()
+            profil_layout.addWidget(radio)
+            
+            info_label = QLabel(info_text)
+            info_label.setWordWrap(True)
+            profil_layout.addWidget(info_label)
+            
+            frame_layout.addLayout(profil_layout)
+            layout.addWidget(frame)
+        
+        # Affectation
+        layout.addWidget(QLabel("<b>Affectation proposée (modifiable) :</b>"))
         aff_combo = QComboBox()
-        aff_combo.addItems([b['code'] for b in bureaux.BUREAUX])
-        layout.addWidget(QLabel("Affectation proposée (modifiez à vos risques) :"))
+        bureaux_codes = [b['code'] for b in bureaux.BUREAUX]
+        aff_combo.addItems(bureaux_codes)
         layout.addWidget(aff_combo)
-        valider_btn = QPushButton("Valider recrutement")
-        layout.addWidget(valider_btn)
+        
+        # Fonction pour mettre à jour le bureau recommandé
+        def update_bureau_recommande():
+            idx = choix_box.checkedId()
+            if 0 <= idx < len(profils):
+                profil_selectionne = profils[idx]
+                if profil_selectionne['bureau_ideal'] in bureaux_codes:
+                    aff_combo.setCurrentText(profil_selectionne['bureau_ideal'])
+        
+        # Connecter les changements de sélection
+        for button in choix_box.buttons():
+            button.toggled.connect(update_bureau_recommande)
+        
+        # Initialiser le bureau recommandé
+        update_bureau_recommande()
+        
+        # Boutons
+        buttons_layout = QHBoxLayout()
+        
+        valider_btn = QPushButton("Recruter l'agent sélectionné")
+        valider_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; padding: 10px; font-weight: bold; }")
+        
+        annuler_btn = QPushButton("Annuler")
+        annuler_btn.setStyleSheet("QPushButton { background-color: #f44336; color: white; padding: 10px; }")
+        annuler_btn.clicked.connect(dlg.reject)
+        
+        buttons_layout.addWidget(annuler_btn)
+        buttons_layout.addWidget(valider_btn)
+        layout.addLayout(buttons_layout)
+        
         def valider_final():
             idx = choix_box.checkedId()
             if idx < 0:
                 QMessageBox.warning(self, "Aucun profil", "Veuillez sélectionner un profil.")
                 return
+            
             profil = profils[idx]
             bureau_choisi = aff_combo.currentText()
             forcer = bureau_choisi != profil['bureau_ideal']
@@ -1185,10 +1497,17 @@ class DGSESimGUI(QMainWindow):
             agent, risque = recrutement.valider_recrutement(profil, bureau_choisi, legende_nom_choisi=None, forcer=forcer, type_recrutement=type_recrutement)
             if agent:
                 self.refresh_agents()
-                QMessageBox.information(self, "Recrutement", f"Agent {agent.nom} {agent.prenom} recruté ({agent.bureau})\n{'Risque accru\u00a0!' if risque else ''}")
+                message = f"Agent {agent.nom} {agent.prenom} recruté avec succès !\n"
+                message += f"Bureau : {agent.bureau}\n"
+                if hasattr(agent, 'langues') and agent.langues:
+                    message += f"Langues : {', '.join([l.title() for l in agent.langues])}\n"
+                if risque:
+                    message += "\n⚠️ Risque accru dû au forçage de bureau !"
+                QMessageBox.information(self, "Recrutement réussi", message)
                 dlg.accept()
             else:
                 QMessageBox.warning(self, "Erreur recrutement", "Erreur lors du paiement ou ajout agent.")
+        
         valider_btn.clicked.connect(valider_final)
         dlg.exec_()
 
@@ -1198,7 +1517,7 @@ class DGSESimGUI(QMainWindow):
         secteur = ciblage["secteur"]
         pays = reseaux.RESEAUX[reseau_nom]["pays"]
         villes_possibles = villes.VILLES_PAR_PAYS.get(pays.lower(), [])
-        langues_possibles = langues.LANGUES_PAR_PAYS.get(pays.lower(), [])
+        langues_possibles = langues.obtenir_langues_pays(pays.lower())
         if not villes_possibles:
             QMessageBox.warning(self, "Erreur", f"Aucune ville trouvée pour le pays : {pays}")
             return
@@ -1241,7 +1560,27 @@ class DGSESimGUI(QMainWindow):
                 dlg.accept()
                 return
             s = candidats[idx]
+            from sources import Source
             from dossiers import DossierSource
+            
+            # Créer l'objet Source pour la liste principale
+            nouvelle_source = Source(
+                nom=s["nom"],
+                prenom=s["prenom"],
+                metier=s["metier"],
+                rattachement=reseau_nom
+            )
+            # Ajouter les informations supplémentaires dans le dossier
+            nouvelle_source.dossier = {
+                "pays": s["pays"],
+                "ville": s["ville"],
+                "competences": s["competences"],
+                "langues": s["langues"],
+                "agent_recruteur": agent.nom + " " + agent.prenom
+            }
+            sources.SOURCES.append(nouvelle_source)
+            
+            # Créer aussi un dossier source pour la compatibilité
             dossier = DossierSource(
                 nom=f"{s['nom']} {s['prenom']}",
                 pays=s["pays"], ville=s["ville"],
@@ -1253,7 +1592,6 @@ class DGSESimGUI(QMainWindow):
                 agent_recruteur=agent.nom + " " + agent.prenom,
                 rattachement=reseau_nom
             )
-            sources.SOURCES.append(dossier)
             reseaux.rattacher_source_reseau(reseau_nom, dossier)
             reseaux.ajouter_evenement(reseau_nom, f"Source recrutée : {dossier.nom}")
             QMessageBox.information(self, "Source ajoutée", f"La source {dossier.nom} a été recrutée.")
@@ -1904,6 +2242,54 @@ class DGSESimGUI(QMainWindow):
         update_villes(pays_combo.currentText())
         layout.addRow("Ville :", ville_combo)
 
+        # Affichage des bonus de langue
+        info_langue_label = QLabel("Sélectionnez un agent et un pays pour voir les bonus de langue")
+        info_langue_label.setWordWrap(True)
+        info_langue_label.setStyleSheet("QLabel { color: #666; font-style: italic; }")
+        layout.addRow("", info_langue_label)
+
+        def update_bonus_langue():
+            try:
+                agent_idx = agent_combo.currentIndex()
+                if agent_idx >= 0 and agent_idx < len(agents_libres):
+                    agent = agents_libres[agent_idx]
+                    pays = pays_combo.currentText()
+                    
+                    # Calculer les bonus de langue
+                    bonus = reseaux.calculer_bonus_langue_agent(agent, pays)
+                    
+                    # Construire le texte d'information
+                    texte_info = f"<b>Langues de l'agent :</b> {', '.join(agent.langues) if agent.langues else 'Aucune'}<br>"
+                    texte_info += f"<b>Langues du pays :</b> {', '.join(bonus['langues_pays'])}<br><br>"
+                    
+                    if bonus['langues_maitrisees']:
+                        texte_info += f"<b>Langues communes :</b> {', '.join(bonus['langues_maitrisees'])}<br>"
+                        texte_info += f"<b>Bonus chance de succès :</b> +{bonus['chance_succes']}%<br>"
+                        texte_info += f"<b>Réduction de coût :</b> -{bonus['reduction_cout']}%<br>"
+                        texte_info += f"<b>Réduction de durée :</b> -{bonus['reduction_duree']}%<br>"
+                        texte_info += f"<b>Bonus de qualité :</b> +{bonus['bonus_qualite']}%<br>"
+                        
+                        info_langue_label.setStyleSheet("QLabel { color: #2E8B57; font-weight: bold; }")
+                    else:
+                        texte_info += "<b>Aucun bonus linguistique</b><br>"
+                        texte_info += "L'agent ne parle aucune langue du pays cible"
+                        info_langue_label.setStyleSheet("QLabel { color: #DC143C; font-weight: bold; }")
+                    
+                    info_langue_label.setText(texte_info)
+                else:
+                    info_langue_label.setText("Sélectionnez un agent et un pays pour voir les bonus de langue")
+                    info_langue_label.setStyleSheet("QLabel { color: #666; font-style: italic; }")
+            except Exception as e:
+                info_langue_label.setText(f"Erreur lors du calcul des bonus : {str(e)}")
+                info_langue_label.setStyleSheet("QLabel { color: #DC143C; }")
+
+        # Connecter les changements pour mettre à jour les bonus
+        agent_combo.currentTextChanged.connect(update_bonus_langue)
+        pays_combo.currentTextChanged.connect(update_bonus_langue)
+        
+        # Mettre à jour une première fois
+        update_bonus_langue()
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         layout.addRow(buttons)
         buttons.accepted.connect(dlg.accept)
@@ -1914,6 +2300,10 @@ class DGSESimGUI(QMainWindow):
             agent = agents_libres[agent_combo.currentIndex()]
             pays = pays_combo.currentText()
             ville = ville_combo.currentText()
+            
+            # Calculer les bonus de langue pour ce réseau
+            bonus_langue = reseaux.calculer_bonus_langue_agent(agent, pays)
+            
             existants = list(reseaux.RESEAUX.keys()) + [r['id'] for r in CREATIONS_RESEAUX_EN_COURS]
             i = 1
             while True:
@@ -1921,11 +2311,22 @@ class DGSESimGUI(QMainWindow):
                 if id_reseau not in existants:
                     break
                 i += 1
-            duree = random.randint(10, 60)
-            date_fin = self.current_game_time + timedelta(days=duree)
+            
+            # Durée de base et réduction linguistique
+            duree_base = random.randint(10, 60)
+            reduction_duree = bonus_langue['reduction_duree']
+            duree_finale = max(3, int(duree_base * (1 - reduction_duree / 100)))
+            
+            date_fin = self.current_game_time + timedelta(days=duree_finale)
 
-            chance = 90  # Succès forcé simplifié
+            # Chance de succès avec bonus linguistique
+            chance_base = 90  # Succès forcé simplifié
+            chance_finale = min(100, chance_base + bonus_langue['chance_succes'])
 
+            # Coût de création avec réduction linguistique
+            cout_base = 15000  # Coût de base pour créer un réseau
+            reduction_cout = bonus_langue['reduction_cout']
+            cout_final = int(cout_base * (1 - reduction_cout / 100))
 
             CREATIONS_RESEAUX_EN_COURS.append({               
                 "id": id_reseau,
@@ -1933,18 +2334,43 @@ class DGSESimGUI(QMainWindow):
                 "pays": pays,
                 "ville": ville,
                 "fin": date_fin,
-                "chance": chance
+                "chance": chance_finale,
+                "cout": cout_final,
+                "bonus_langue": bonus_langue
             })
-            self.refresh_reseaux()
-            QMessageBox.information(self, "Réseau en création", f"{id_reseau} lancé à {ville} ({pays}) — résultat dans {duree} jours ingame.")
             
+            self.refresh_reseaux()
+            
+            # Message d'information avec les bonus
+            message = f"{id_reseau} lancé à {ville} ({pays}) — résultat dans {duree_finale} jours ingame."
+            if bonus_langue['langues_maitrisees']:
+                message += f"\n\n<b>Bonus linguistiques appliqués :</b>"
+                message += f"\n• Chance de succès : {chance_finale}% (+{bonus_langue['chance_succes']}%)"
+                message += f"\n• Coût réduit : {cout_final}€ (-{reduction_cout}%)"
+                message += f"\n• Durée réduite : {duree_finale} jours (-{reduction_duree}%)"
+                message += f"\n• Qualité améliorée : +{bonus_langue['bonus_qualite']}%"
+            
+            QMessageBox.information(self, "Réseau en création", message)
+
     def refresh_reseaux(self):
         self.reseauList.clear()
         for k, v in reseaux.RESEAUX.items():
             self.reseauList.addItem(f"{k} ({v['pays']})")
         for r in CREATIONS_RESEAUX_EN_COURS:
-            self.reseauList.addItem(f"{r['id']} à {r['pays']} {r['ville']} — EN COURS DE CRÉATION")
+            # Afficher les informations détaillées avec bonus linguistiques
+            info_reseau = f"{r['id']} à {r['pays']} {r['ville']} — EN COURS DE CRÉATION"
             
+            # Ajouter les informations de coût et de bonus si disponibles
+            if 'cout' in r:
+                info_reseau += f" | Coût: {r['cout']}€"
+            
+            if 'bonus_langue' in r and r['bonus_langue']['langues_maitrisees']:
+                bonus = r['bonus_langue']
+                langues_communes = ', '.join(bonus['langues_maitrisees'])
+                info_reseau += f" | Langues: {langues_communes} (+{bonus['chance_succes']}% succès)"
+            
+            self.reseauList.addItem(info_reseau)
+
     def ouvrir_fiche_reseau(self, item):
         texte = item.text()
         if "à" in texte:
@@ -1966,6 +2392,27 @@ class DGSESimGUI(QMainWindow):
         layout.addWidget(QLabel(f"<b>Ville :</b> {r['ville']}"))
         layout.addWidget(QLabel(f"<b>Coordonnées :</b> {r['lat']} / {r['lon']}"))
 
+        # Affichage de la qualité du réseau
+        if 'qualite' in r:
+            qualite = r['qualite']
+            bonus_qualite = r.get('bonus_qualite', 0)
+            couleur_qualite = "#2E8B57" if qualite == "Excellente" else "#FF8C00" if qualite == "Bonne" else "#4169E1"
+            layout.addWidget(QLabel(f"<b>Qualité :</b> <span style='color: {couleur_qualite};'>{qualite}</span> (+{bonus_qualite}%)"))
+        else:
+            layout.addWidget(QLabel(f"<b>Qualité :</b> Standard"))
+
+        # Informations sur l'agent de création
+        if 'agent_creation' in r:
+            agent_creation = r['agent_creation']
+            layout.addWidget(QLabel(f"<b>Agent créateur :</b> {agent_creation['nom']} ({agent_creation['bureau']})"))
+            layout.addWidget(QLabel(f"<b>Langues de l'agent :</b> {', '.join(agent_creation['langues'])}"))
+            
+            # Afficher les bonus appliqués
+            bonus = agent_creation['bonus_appliques']
+            if bonus['langues_maitrisees']:
+                layout.addWidget(QLabel(f"<b>Langues communes :</b> {', '.join(bonus['langues_maitrisees'])}"))
+                layout.addWidget(QLabel(f"<b>Bonus appliqués :</b> +{bonus['chance_succes']}% succès, -{bonus['reduction_cout']}% coût, -{bonus['reduction_duree']}% durée"))
+
         resp = r.get("responsable")
         if resp:
             info = f"{resp.nom} {resp.prenom}"
@@ -1983,190 +2430,52 @@ class DGSESimGUI(QMainWindow):
                 code = f" (Code: {a.nom_code})" if a.nom_code else ""
                 layout.addWidget(QLabel(f"- {a.nom} {a.prenom}{code} — {a.bureau}"))
         else:
-            layout.addWidget(QLabel("Aucun agent"))
+            layout.addWidget(QLabel("Aucun agent affecté"))
 
         # Sources
-        layout.addWidget(QLabel("<b>Sources rattachées :</b>"))
+        layout.addWidget(QLabel("<b>Sources :</b>"))
         if r["sources"]:
             for s in r["sources"]:
-                layout.addWidget(QLabel(f"- {s.nom} — {s.infos.get('metier', 'Inconnu')}"))
+                # Gérer les deux types d'objets : Source et DossierSource
+                if hasattr(s, 'prenom') and hasattr(s, 'metier'):
+                    # Objet Source
+                    layout.addWidget(QLabel(f"- {s.nom} {s.prenom} — {s.metier}"))
+                elif hasattr(s, 'infos') and 'metier' in s.infos:
+                    # Objet DossierSource
+                    metier = s.infos.get('metier', 'N/A')
+                    layout.addWidget(QLabel(f"- {s.nom} — {metier}"))
+                else:
+                    # Fallback
+                    layout.addWidget(QLabel(f"- {getattr(s, 'nom', 'Source inconnue')}"))
         else:
             layout.addWidget(QLabel("Aucune source"))
 
-        # Missions
-        layout.addWidget(QLabel("<b>Missions liées :</b>"))
-        if r["missions"]:
-            for m in r["missions"]:
-                layout.addWidget(QLabel(f"- {m.description} ({m.statut})"))
-        else:
-            layout.addWidget(QLabel("Aucune mission"))
+        # Événements du réseau
+        if r.get("evenements"):
+            layout.addWidget(QLabel("<b>Événements récents :</b>"))
+            for evenement in r["evenements"][:5]:  # Afficher les 5 derniers
+                layout.addWidget(QLabel(f"• {evenement}"))
 
-        # Historique des événements
-        layout.addWidget(QLabel("<b>Historique du réseau :</b>"))
-        histo = r.get("evenements", [])
-        if histo:
-            for evt in histo[:5]:
-                layout.addWidget(QLabel(f"• {evt}"))
-        else:
-            layout.addWidget(QLabel("Aucun événement enregistré"))
-
-        # Gestion responsable
-        btns = QHBoxLayout()
-        btn_assigner = QPushButton("Assigner agent")
-        btn_suppr = QPushButton("Supprimer responsable")
-        btns.addWidget(btn_assigner)
-        btns.addWidget(btn_suppr)
-        layout.addLayout(btns)
-
-        btn_assigner.setEnabled(resp is None)
-        btn_suppr.setEnabled(resp is not None)
-
-        def assigner():
-            popup = QDialog(dlg)
-            popup.setWindowTitle("Assigner responsable")
-            vbox = QVBoxLayout(popup)
-            combo = QComboBox()
-            all_agents = agents.AGENTS
-            for a in all_agents:
-                code = f" (Code: {a.nom_code})" if a.nom_code else ""
-                combo.addItem(f"{a.nom} {a.prenom}{code} — {a.bureau}")
-            vbox.addWidget(QLabel("Sélectionnez un agent :"))
-            vbox.addWidget(combo)
-            bvalider = QPushButton("Valider")
-            vbox.addWidget(bvalider)
-            def confirmer():
-                ag = all_agents[combo.currentIndex()]
-                reseaux.definir_responsable(nom, ag)
-                reseaux.ajouter_evenement(nom, f"Responsable assigné : {ag.nom} {ag.prenom}")
-                popup.accept()
-                dlg.accept()
-                self.refresh_reseaux()
-            bvalider.clicked.connect(confirmer)
-            popup.setLayout(vbox)
-            popup.exec_()
-
-        def retirer():
-            reseaux.supprimer_responsable(nom)
-            reseaux.ajouter_evenement(nom, "Responsable supprimé.")
-            dlg.accept()
-            self.refresh_reseaux()
-
-        btn_assigner.clicked.connect(assigner)
-        btn_suppr.clicked.connect(retirer)
-        # --- Boutons ajouter / retirer agent (hors responsable) ---
-        gestion_layout = QHBoxLayout()
-        btn_ajouter_agent = QPushButton("Ajouter un agent")
-        btn_retirer_agent = QPushButton("Supprimer un agent")
-        btn_retirer_agent.setEnabled(len(r["agents"]) > 0)
-        gestion_layout.addWidget(btn_ajouter_agent)
-        gestion_layout.addWidget(btn_retirer_agent)
-        layout.addLayout(gestion_layout)
-
-        def ajouter_agent():
-            popup = QDialog(dlg)
-            popup.setWindowTitle("Ajouter un agent")
-            vbox = QVBoxLayout(popup)
-            combo = QComboBox()
-            disponibles = [a for a in agents.AGENTS if a not in r["agents"] and a != resp]
-            for a in disponibles:
-                code = f" (Code: {a.nom_code})" if a.nom_code else ""
-                combo.addItem(f"{a.nom} {a.prenom}{code} — {a.bureau}")
-            if not disponibles:
-                QMessageBox.information(dlg, "Aucun agent", "Aucun agent disponible.")
-                return
-            vbox.addWidget(QLabel("Sélectionnez un agent à ajouter :"))
-            vbox.addWidget(combo)
-            btn_valider = QPushButton("Ajouter")
-            vbox.addWidget(btn_valider)
-
-            def valider_ajout():
-                ag = disponibles[combo.currentIndex()]
-                reseaux.rattacher_agent_reseau(nom, ag)
-                reseaux.ajouter_evenement(nom, f"Agent ajouté : {ag.nom} {ag.prenom}")
-                popup.accept()
-                dlg.accept()
-                self.refresh_reseaux()
-
-            btn_valider.clicked.connect(valider_ajout)
-            popup.setLayout(vbox)
-            popup.exec_()
-
-        def retirer_agent():
-            popup = QDialog(dlg)
-            popup.setWindowTitle("Supprimer un agent")
-            vbox = QVBoxLayout(popup)
-            combo = QComboBox()
-            affectes = r["agents"]
-            for a in affectes:
-                code = f" (Code: {a.nom_code})" if a.nom_code else ""
-                combo.addItem(f"{a.nom} {a.prenom}{code} — {a.bureau}")
-            if not affectes:
-                QMessageBox.information(dlg, "Aucun agent", "Aucun agent à retirer.")
-                return
-            vbox.addWidget(QLabel("Sélectionnez un agent à retirer :"))
-            vbox.addWidget(combo)
-            btn_valider = QPushButton("Retirer")
-            vbox.addWidget(btn_valider)
-
-            def valider_retrait():
-                ag = affectes[combo.currentIndex()]
-                r["agents"].remove(ag)
-                reseaux.ajouter_evenement(nom, f"Agent retiré : {ag.nom} {ag.prenom}")
-                popup.accept()
-                dlg.accept()
-                self.refresh_reseaux()
-
-            btn_valider.clicked.connect(valider_retrait)
-            popup.setLayout(vbox)
-            popup.exec_()
-
-        btn_ajouter_agent.clicked.connect(ajouter_agent)
-        btn_retirer_agent.clicked.connect(retirer_agent)
-        btn_recherche = QPushButton("Rechercher une source")
-        layout.addWidget(btn_recherche)
-
-        def lancer_recherche_source():
-            popup = QDialog(dlg)
-            popup.setWindowTitle("Recherche de source")
-            vbox = QVBoxLayout(popup)
-            agents_assignes = r["agents"]
-            if not agents_assignes:
-                QMessageBox.warning(popup, "Aucun agent", "Aucun agent n'est affecté à ce réseau.")
-                return
-            combo_agents = QComboBox()
-            for a in agents_assignes:
-                combo_agents.addItem(f"{a.nom} {a.prenom} ({a.bureau})")
-            vbox.addWidget(QLabel("Sélectionnez l'agent qui lance la recherche :"))
-            vbox.addWidget(combo_agents)
-
-            secteurs = sorted(set([v["secteur"] for v in metiers.METIERS.values()]))
-            combo_secteurs = QComboBox()
-            combo_secteurs.addItems(secteurs)
-            vbox.addWidget(QLabel("Choisissez un secteur d'activité :"))
-            vbox.addWidget(combo_secteurs)
-
-            valider = QPushButton("Lancer la recherche")
-            vbox.addWidget(valider)
-
-            def valider_recherche():
-                agent = agents_assignes[combo_agents.currentIndex()]
-                secteur = combo_secteurs.currentText()
-                duree = random.randint(3, 10)
-                date_debut = self.current_game_time
-                date_fin = date_debut + timedelta(days=duree)
-                RECRUTEMENTS_EN_COURS.append(RecrutementEnCours(
-                    "source", {"agent": agent, "secteur": secteur, "reseau": nom}, date_debut, date_fin
-                ))
-                reseaux.ajouter_evenement(nom, f"Recherche de source lancée par {agent.nom} {agent.prenom} dans le secteur {secteur}")
-                popup.accept()
-                QMessageBox.information(self, "Recherche lancée", f"Résultats attendus dans {duree} jours ingame.")
-
-            valider.clicked.connect(valider_recherche)
-            popup.setLayout(vbox)
-            popup.exec_()
-
-        btn_recherche.clicked.connect(lancer_recherche_source)
-
+        # Boutons d'action
+        buttons_layout = QHBoxLayout()
+        
+        # Bouton pour assigner un responsable
+        if not resp:
+            assigner_btn = QPushButton("Assigner responsable")
+            assigner_btn.clicked.connect(lambda: self._assigner_responsable_reseau(nom, dlg))
+            buttons_layout.addWidget(assigner_btn)
+        
+        # Bouton pour ajouter/retirer des agents
+        agents_btn = QPushButton("Gérer agents")
+        agents_btn.clicked.connect(lambda: self._gerer_agents_reseau(nom, dlg))
+        buttons_layout.addWidget(agents_btn)
+        
+        # Bouton pour rechercher des sources
+        sources_btn = QPushButton("Rechercher sources")
+        sources_btn.clicked.connect(lambda: self._rechercher_sources_reseau(nom, dlg))
+        buttons_layout.addWidget(sources_btn)
+        
+        layout.addLayout(buttons_layout)
 
         dlg.setLayout(layout)
         dlg.exec_()
@@ -2664,6 +2973,219 @@ class DGSESimGUI(QMainWindow):
             self.reputation_actuelle_label.setText(f"Réputation actuelle: {reputation_actuelle}/100")
         except Exception as e:
             print(f"Erreur lors du rafraîchissement de l'onglet cheat: {e}")
+
+    def _assigner_responsable_reseau(self, nom_reseau, parent_dialog):
+        """Fonction pour assigner un responsable au réseau"""
+        popup = QDialog(parent_dialog)
+        popup.setWindowTitle("Assigner responsable")
+        vbox = QVBoxLayout(popup)
+        combo = QComboBox()
+        all_agents = agents.AGENTS
+        for a in all_agents:
+            code = f" (Code: {a.nom_code})" if a.nom_code else ""
+            combo.addItem(f"{a.nom} {a.prenom}{code} — {a.bureau}")
+        vbox.addWidget(QLabel("Sélectionnez un agent :"))
+        vbox.addWidget(combo)
+        bvalider = QPushButton("Valider")
+        vbox.addWidget(bvalider)
+        
+        def confirmer():
+            ag = all_agents[combo.currentIndex()]
+            reseaux.definir_responsable(nom_reseau, ag)
+            reseaux.ajouter_evenement(nom_reseau, f"Responsable assigné : {ag.nom} {ag.prenom}")
+            popup.accept()
+            parent_dialog.accept()
+            self.refresh_reseaux()
+        
+        bvalider.clicked.connect(confirmer)
+        popup.setLayout(vbox)
+        popup.exec_()
+
+    def _gerer_agents_reseau(self, nom_reseau, parent_dialog):
+        """Fonction pour gérer les agents du réseau"""
+        popup = QDialog(parent_dialog)
+        popup.setWindowTitle("Gérer les agents")
+        vbox = QVBoxLayout(popup)
+        
+        # Boutons pour ajouter/retirer des agents
+        btn_ajouter = QPushButton("Ajouter un agent")
+        btn_retirer = QPushButton("Retirer un agent")
+        vbox.addWidget(btn_ajouter)
+        vbox.addWidget(btn_retirer)
+        
+        def ajouter_agent():
+            popup_ajout = QDialog(popup)
+            popup_ajout.setWindowTitle("Ajouter un agent")
+            vbox_ajout = QVBoxLayout(popup_ajout)
+            combo = QComboBox()
+            reseau = reseaux.RESEAUX[nom_reseau]
+            disponibles = [a for a in agents.AGENTS if a not in reseau["agents"] and a != reseau.get("responsable")]
+            for a in disponibles:
+                code = f" (Code: {a.nom_code})" if a.nom_code else ""
+                combo.addItem(f"{a.nom} {a.prenom}{code} — {a.bureau}")
+            if not disponibles:
+                QMessageBox.information(popup_ajout, "Aucun agent", "Aucun agent disponible.")
+                return
+            vbox_ajout.addWidget(QLabel("Sélectionnez un agent à ajouter :"))
+            vbox_ajout.addWidget(combo)
+            btn_valider = QPushButton("Ajouter")
+            vbox_ajout.addWidget(btn_valider)
+            
+            def valider_ajout():
+                ag = disponibles[combo.currentIndex()]
+                reseaux.rattacher_agent_reseau(nom_reseau, ag)
+                reseaux.ajouter_evenement(nom_reseau, f"Agent ajouté : {ag.nom} {ag.prenom}")
+                popup_ajout.accept()
+                popup.accept()
+                parent_dialog.accept()
+                self.refresh_reseaux()
+            
+            btn_valider.clicked.connect(valider_ajout)
+            popup_ajout.setLayout(vbox_ajout)
+            popup_ajout.exec_()
+        
+        def retirer_agent():
+            popup_retrait = QDialog(popup)
+            popup_retrait.setWindowTitle("Retirer un agent")
+            vbox_retrait = QVBoxLayout(popup_retrait)
+            combo = QComboBox()
+            reseau = reseaux.RESEAUX[nom_reseau]
+            affectes = [a for a in reseau["agents"] if a != reseau.get("responsable")]
+            for a in affectes:
+                code = f" (Code: {a.nom_code})" if a.nom_code else ""
+                combo.addItem(f"{a.nom} {a.prenom}{code} — {a.bureau}")
+            if not affectes:
+                QMessageBox.information(popup_retrait, "Aucun agent", "Aucun agent à retirer.")
+                return
+            vbox_retrait.addWidget(QLabel("Sélectionnez un agent à retirer :"))
+            vbox_retrait.addWidget(combo)
+            btn_valider = QPushButton("Retirer")
+            vbox_retrait.addWidget(btn_valider)
+            
+            def valider_retrait():
+                ag = affectes[combo.currentIndex()]
+                reseau["agents"].remove(ag)
+                reseaux.ajouter_evenement(nom_reseau, f"Agent retiré : {ag.nom} {ag.prenom}")
+                popup_retrait.accept()
+                popup.accept()
+                parent_dialog.accept()
+                self.refresh_reseaux()
+            
+            btn_valider.clicked.connect(valider_retrait)
+            popup_retrait.setLayout(vbox_retrait)
+            popup_retrait.exec_()
+        
+        btn_ajouter.clicked.connect(ajouter_agent)
+        btn_retirer.clicked.connect(retirer_agent)
+        
+        popup.setLayout(vbox)
+        popup.exec_()
+
+    def _rechercher_sources_reseau(self, nom_reseau, parent_dialog):
+        """Fonction pour rechercher des sources via le réseau"""
+        popup = QDialog(parent_dialog)
+        popup.setWindowTitle("Recherche de source")
+        vbox = QVBoxLayout(popup)
+        
+        reseau = reseaux.RESEAUX[nom_reseau]
+        agents_assignes = reseau["agents"]
+        if not agents_assignes:
+            QMessageBox.warning(popup, "Aucun agent", "Aucun agent n'est affecté à ce réseau.")
+            return
+        
+        # Afficher la qualité du réseau et son impact sur la recherche de sources
+        qualite_reseau = reseau.get("qualite", "Standard")
+        bonus_qualite = reseau.get("bonus_qualite", 0)
+        
+        info_qualite = QLabel(f"<b>Qualité du réseau :</b> {qualite_reseau}")
+        if bonus_qualite > 0:
+            info_qualite.setStyleSheet("QLabel { color: #2E8B57; font-weight: bold; }")
+        elif bonus_qualite < 0:
+            info_qualite.setStyleSheet("QLabel { color: #DC143C; font-weight: bold; }")
+        vbox.addWidget(info_qualite)
+        
+        # Impact de la qualité sur la recherche de sources
+        impact_qualite = 0
+        if qualite_reseau == "Excellente":
+            impact_qualite = 25
+        elif qualite_reseau == "Bonne":
+            impact_qualite = 15
+        elif qualite_reseau == "Améliorée":
+            impact_qualite = 10
+        elif qualite_reseau == "Faible":
+            impact_qualite = -10
+        
+        if impact_qualite != 0:
+            impact_label = QLabel(f"<b>Impact sur la recherche de sources :</b> {impact_qualite:+d}% de chance de succès")
+            if impact_qualite > 0:
+                impact_label.setStyleSheet("QLabel { color: #2E8B57; }")
+            else:
+                impact_label.setStyleSheet("QLabel { color: #DC143C; }")
+            vbox.addWidget(impact_label)
+        
+        vbox.addWidget(QLabel(""))  # Ligne vide
+        
+        combo_agents = QComboBox()
+        for a in agents_assignes:
+            combo_agents.addItem(f"{a.nom} {a.prenom} ({a.bureau})")
+        vbox.addWidget(QLabel("Sélectionnez l'agent qui lance la recherche :"))
+        vbox.addWidget(combo_agents)
+        
+        try:
+            from metiers import METIERS
+            secteurs = sorted(set([v["secteur"] for v in METIERS.values()]))
+            combo_secteurs = QComboBox()
+            combo_secteurs.addItems(secteurs)
+            vbox.addWidget(QLabel("Choisissez un secteur d'activité :"))
+            vbox.addWidget(combo_secteurs)
+            
+            valider = QPushButton("Lancer la recherche")
+            vbox.addWidget(valider)
+            
+            def valider_recherche():
+                agent = agents_assignes[combo_agents.currentIndex()]
+                secteur = combo_secteurs.currentText()
+                
+                # Calculer la durée et la chance de succès selon la qualité du réseau
+                duree_base = random.randint(3, 10)
+                duree_finale = max(1, int(duree_base * (1 - abs(impact_qualite) / 100)))
+                
+                # Chance de succès de base + bonus de qualité du réseau
+                chance_base = 70  # 70% de base
+                chance_finale = min(95, max(5, chance_base + impact_qualite))
+                
+                date_debut = self.current_game_time
+                date_fin = date_debut + timedelta(days=duree_finale)
+                
+                # Ajouter à la liste des recrutements en cours
+                RECRUTEMENTS_EN_COURS.append(RecrutementEnCours(
+                    "source", {"agent": agent, "secteur": secteur, "reseau": nom_reseau}, date_debut, date_fin
+                ))
+                
+                reseaux.ajouter_evenement(nom_reseau, f"Recherche de source lancée par {agent.nom} {agent.prenom} dans le secteur {secteur}")
+                popup.accept()
+                
+                # Message de confirmation avec les bonus
+                message = f"Recherche de source lancée !<br><br>"
+                message += f"<b>Agent :</b> {agent.nom} {agent.prenom}<br>"
+                message += f"<b>Secteur :</b> {secteur}<br>"
+                message += f"<b>Durée estimée :</b> {duree_finale} jours<br>"
+                message += f"<b>Chance de succès :</b> {chance_finale}%"
+                
+                if impact_qualite > 0:
+                    message += f" (+{impact_qualite}% grâce à la qualité du réseau)"
+                elif impact_qualite < 0:
+                    message += f" ({impact_qualite}% à cause de la qualité du réseau)"
+                
+                QMessageBox.information(self, "Recherche lancée", message)
+            
+            valider.clicked.connect(valider_recherche)
+            
+        except ImportError:
+            vbox.addWidget(QLabel("Module métiers non disponible"))
+        
+        popup.setLayout(vbox)
+        popup.exec_()
 
 
 def run_gui():

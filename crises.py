@@ -189,11 +189,11 @@ class Crise:
     def _calculer_taux_degradation_journaliere(self):
         """Calcule le taux de dégradation journalière selon la gravité"""
         taux_degradation = {
-            "Faible": 4,
-            "Modérée": 5,
-            "Élevée": 8,
-            "Critique": 10,
-            "Maximale": 20
+            "Faible": 2,
+            "Modérée": 3,
+            "Élevée": 6,
+            "Critique": 8,
+            "Maximale": 13
         }
         return taux_degradation.get(self.gravite, 2)
     

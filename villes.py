@@ -1,6 +1,28 @@
 # villes.py
 
 VILLES_PAR_PAYS = {
+    "france": [
+        {"ville": "Paris", "lat": 48.8566, "lon": 2.3522},
+        {"ville": "Marseille", "lat": 43.2965, "lon": 5.3698},
+        {"ville": "Lyon", "lat": 45.7640, "lon": 4.8357},
+        {"ville": "Toulouse", "lat": 43.6047, "lon": 1.4442},
+        {"ville": "Nice", "lat": 43.7102, "lon": 7.2620},
+        {"ville": "Nantes", "lat": 47.2184, "lon": -1.5536},
+        {"ville": "Strasbourg", "lat": 48.5734, "lon": 7.7521},
+        {"ville": "Montpellier", "lat": 43.6119, "lon": 3.8772},
+        {"ville": "Bordeaux", "lat": 44.8378, "lon": -0.5792},
+        {"ville": "Lille", "lat": 50.6292, "lon": 3.0573},
+        {"ville": "Rennes", "lat": 48.1173, "lon": -1.6778},
+        {"ville": "Reims", "lat": 49.2583, "lon": 4.0317},
+        {"ville": "Le Havre", "lat": 49.4944, "lon": 0.1079},
+        {"ville": "Cergy-Pontoise", "lat": 49.0370, "lon": 2.0781},
+        {"ville": "Saint-Étienne", "lat": 45.4397, "lon": 4.3872},
+        {"ville": "Toulon", "lat": 43.1242, "lon": 5.9280},
+        {"ville": "Angers", "lat": 47.4784, "lon": -0.5632},
+        {"ville": "Grenoble", "lat": 45.1885, "lon": 5.7245},
+        {"ville": "Dijon", "lat": 47.3220, "lon": 5.0415},
+        {"ville": "Nîmes", "lat": 43.8367, "lon": 4.3601}
+    ],
     "allemagne": [
         {"ville": "Berlin", "lat": 52.5200, "lon": 13.4050},
         {"ville": "Hambourg", "lat": 53.5511, "lon": 9.9937},
