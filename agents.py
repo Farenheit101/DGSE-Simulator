@@ -1,5 +1,5 @@
 import random
-from langues import LANGUES_PAR_PAYS
+from geographie import LANGUES_PAR_PAYS
 
 class Agent:
     def __init__(self, nom, prenom, pays, bureau, competences, langues, niveau=1, exp=0,

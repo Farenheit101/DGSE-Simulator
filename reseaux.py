@@ -9,7 +9,7 @@ def calculer_bonus_langue_agent(agent, pays_cible):
     Retourne un dictionnaire avec les différents bonus
     """
     try:
-        from langues import LANGUES_PAR_PAYS
+        from geographie import LANGUES_PAR_PAYS
         
         # Récupérer les langues du pays cible
         langues_pays = LANGUES_PAR_PAYS.get(pays_cible.lower(), [])

@@ -705,13 +705,25 @@ class GestionnaireActions:
             else:
                 impact_base = random.randint(30, 50)     # Actions coûteuses : 30-50%
             
-            # Appliquer le bonus de réseau
+            # Calculer le bonus de réussite des prérequis
+            bonus_prerequis = self._calculer_bonus_prerequis_action(action)
+            
+            # Appliquer les bonus
+            impact_final = impact_base + bonus_reseau + bonus_prerequis
+            
+            # Log des bonus appliqués
+            bonus_appliques = []
             if bonus_reseau > 0:
-                impact_final = impact_base + bonus_reseau
-                print(f"INFO: Bonus réseau appliqué! Agent rattaché au réseau '{nom_reseau}' dans {pays_crise}. Impact: {impact_base}% + {bonus_reseau}% = {impact_final}%")
-                return impact_final
+                bonus_appliques.append(f"réseau: +{bonus_reseau}%")
+            if bonus_prerequis > 0:
+                bonus_appliques.append(f"prérequis: +{bonus_prerequis}%")
+            
+            if bonus_appliques:
+                print(f"INFO: Bonus appliqués sur action {action.type_action.value}! Impact: {impact_base}% + {' + '.join(bonus_appliques)} = {impact_final}%")
             else:
-                return impact_base
+                print(f"INFO: Action {action.type_action.value} réussie! Impact: {impact_base}% (aucun bonus)")
+            
+            return impact_final
         else:
             # Impact négatif basé sur le coût de l'action
             if action.cout <= 10000:
@@ -720,7 +732,46 @@ class GestionnaireActions:
                 return -random.randint(10, 25)    # Actions moyennes : -10 à -25%
             else:
                 return -random.randint(25, 40)    # Actions coûteuses : -25 à -40%
-
+    
+    def _calculer_bonus_prerequis_action(self, action):
+        """
+        Calcule le bonus de réussite basé sur les prérequis de l'action
+        """
+        try:
+            from actions_crises import verifier_prerequis
+            from agents import get_agent_by_nom
+            
+            if not action.agent_id:
+                return 0
+            
+            # Extraire nom et prénom de l'agent
+            if ' ' in action.agent_id:
+                nom, prenom = action.agent_id.split(' ', 1)
+            else:
+                nom, prenom = action.agent_id, ""
+            
+            agent = get_agent_by_nom(nom, prenom)
+            if not agent:
+                return 0
+            
+            # Vérifier les prérequis pour obtenir le bonus
+            prerequis_ok, message_prerequis = verifier_prerequis(action, agent)
+            if not prerequis_ok:
+                return 0
+            
+            # Extraire le bonus du message (format: "Bonus: +X%")
+            if "Bonus: +" in message_prerequis:
+                try:
+                    bonus_str = message_prerequis.split("Bonus: +")[1].split("%")[0]
+                    return int(bonus_str)
+                except (ValueError, IndexError):
+                    pass
+            
+            return 0
+            
+        except Exception:
+            return 0
+    
     def _calculer_bonus_reputation_action(self, action):
         """Calcule le bonus de réputation pour une action réussie"""
         # Bonus basé sur le coût et le type d'action

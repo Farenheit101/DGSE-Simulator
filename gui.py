@@ -22,9 +22,7 @@ import budget
 import bureaux
 import agences
 import metiers
-import noms
-import langues
-import villes
+import geographie
 import services_francais
 import fiches
 import reseaux
@@ -236,7 +234,7 @@ class DGSESimGUI(QMainWindow):
                 agent = r["agent"]
                 success = random.randint(1, 100) <= chance
                 if success:
-                    villes_dispo = villes.VILLES_PAR_PAYS[r["pays"]]
+                    villes_dispo = geographie.VILLES_PAR_PAYS[r["pays"]]
                     v = next((v for v in villes_dispo if v["ville"] == r["ville"]), {})
                     reseaux.ajouter_reseau(r["id"], r["pays"], r["ville"], v.get("lat", 0), v.get("lon", 0))
                     reseaux.RESEAUX[r["id"]]["agents"].append(agent)
@@ -1114,7 +1112,7 @@ class DGSESimGUI(QMainWindow):
         layout.addLayout(btns)
 
         def creer_legende_direct():
-            from noms import NOMS_PRENOMS
+            from geographie import NOMS_PRENOMS
             pays_dlg = QDialog(self)
             pays_dlg.setWindowTitle("Sélectionner le pays du faux nom de la légende")
             playout = QVBoxLayout(pays_dlg)
@@ -1130,7 +1128,7 @@ class DGSESimGUI(QMainWindow):
                 if not couverture or not couverture.get("metier"):
                     QMessageBox.warning(self, "Aucun métier", "Aucun métier possible pour ces compétences.")
                     return
-                nom_temp, prenom_temp = noms.generer_nom_prenom(pays)
+                nom_temp, prenom_temp = geographie.generer_nom_prenom(pays)
                 legende_temp = {
                     "nom": nom_temp,
                     "prenom": prenom_temp,
@@ -1222,12 +1220,12 @@ class DGSESimGUI(QMainWindow):
         # Pays
         pays_combo = QComboBox()
         pays_combo.addItem("Aucun", None)
-        for pays in sorted(villes.VILLES_PAR_PAYS.keys()):
+        for pays in sorted(geographie.VILLES_PAR_PAYS.keys()):
             pays_combo.addItem(pays.title(), pays)
         ciblage_layout.addRow("Pays:", pays_combo)
         
         # Langue (NOUVEAU) - Import de la source unique
-        from langues import obtenir_toutes_langues
+        from geographie import obtenir_toutes_langues
         langue_combo = QComboBox()
         langue_combo.addItem("Aucune", None)
         langues_disponibles = obtenir_toutes_langues()
@@ -1516,15 +1514,15 @@ class DGSESimGUI(QMainWindow):
         agent = ciblage["agent"]
         secteur = ciblage["secteur"]
         pays = reseaux.RESEAUX[reseau_nom]["pays"]
-        villes_possibles = villes.VILLES_PAR_PAYS.get(pays.lower(), [])
-        langues_possibles = langues.obtenir_langues_pays(pays.lower())
+        villes_possibles = geographie.VILLES_PAR_PAYS.get(pays.lower(), [])
+        langues_possibles = geographie.obtenir_langues_pays(pays.lower())
         if not villes_possibles:
             QMessageBox.warning(self, "Erreur", f"Aucune ville trouvée pour le pays : {pays}")
             return
 
         candidats = []
         for _ in range(random.randint(1, 3)):
-            nom, prenom = noms.generer_nom_prenom(pays)
+            nom, prenom = geographie.generer_nom_prenom(pays)
             ville = random.choice(villes_possibles)["ville"]
             metier = metiers.choisir_metier_secteur(secteur)
             langues_source = random.sample(langues_possibles, k=min(2, len(langues_possibles)))
@@ -2231,13 +2229,13 @@ class DGSESimGUI(QMainWindow):
         layout.addRow("Agent :", agent_combo)
 
         pays_combo = QComboBox()
-        pays_combo.addItems(sorted(villes.VILLES_PAR_PAYS.keys()))
+        pays_combo.addItems(sorted(geographie.VILLES_PAR_PAYS.keys()))
         layout.addRow("Pays :", pays_combo)
 
         ville_combo = QComboBox()
         def update_villes(p):
             ville_combo.clear()
-            ville_combo.addItems([v["ville"] for v in villes.VILLES_PAR_PAYS[p]])
+            ville_combo.addItems([v["ville"] for v in geographie.VILLES_PAR_PAYS[p]])
         pays_combo.currentTextChanged.connect(update_villes)
         update_villes(pays_combo.currentText())
         layout.addRow("Ville :", ville_combo)

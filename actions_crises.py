@@ -203,7 +203,7 @@ ACTIONS_DISPONIBLES = {
         "cout": 25000,
         "duree_minutes": 180,
         "description": "Arrestation d'un suspect",
-        "prerequis": ["agent_disponible", "competence_combat", "competence_securite", "support_local"],
+        "prerequis": ["agent_disponible", "competence_combat", "competence_securite"],
         "risques": ["Résistance armée", "Évasion", "Compromission"],
         "recompenses": ["Suspect en détention", "Interrogatoire possible"]
     },
@@ -268,7 +268,7 @@ ACTIONS_DISPONIBLES = {
         "cout": 50000,
         "duree_minutes": 360,
         "description": "Opération covert complexe multi-phases",
-        "prerequis": ["agent_disponible", "competence_infiltration", "competence_gestion", "support_equipe"],
+        "prerequis": ["agent_disponible", "competence_infiltration", "competence_gestion",],
         "risques": ["Détection", "Compromission majeure", "Échec total"],
         "recompenses": ["Objectif principal atteint", "Informations critiques"]
     }
@@ -306,40 +306,39 @@ def verifier_prerequis(action, agent, equipements_disponibles=None):
     prerequis = action.prerequis
     equipements_disponibles = equipements_disponibles or []
     
+    # Compter les prérequis satisfaits pour le bonus
+    prerequis_satisfaits = 0
+    total_prerequis = len(prerequis)
+    
     # 1) Vérifier les prérequis non liés aux compétences (équipements, autorisations, disponibilité)
     for p in prerequis:
         if p == "agent_disponible":
             # Utiliser le nouveau système de statut si disponible
             if hasattr(agent, 'est_disponible'):
                 if not agent.est_disponible():
-                    return False, "Agent non disponible"
+                    continue  # Ne pas compter comme satisfait
             else:
                 if not hasattr(agent, 'en_mission') or agent.en_mission():
-                    return False, "Agent non disponible"
+                    continue  # Ne pas compter comme satisfait
+            prerequis_satisfaits += 1
         
         elif p == "equipement_interception":
-            if "Équipement d'interception" not in equipements_disponibles:
-                return False, "Équipement d'interception non disponible"
+            if "Équipement d'interception" in equipements_disponibles:
+                prerequis_satisfaits += 1
         
         elif p == "equipement_sigint":
-            if "Équipement SIGINT" not in equipements_disponibles:
-                return False, "Équipement SIGINT non disponible"
+            if "Équipement SIGINT" in equipements_disponibles:
+                prerequis_satisfaits += 1
         
         elif p == "laboratoire":
-            if "Laboratoire forensique" not in equipements_disponibles:
-                return False, "Laboratoire forensique non disponible"
+            if "Laboratoire forensique" in equipements_disponibles:
+                prerequis_satisfaits += 1
         
-        elif p == "support_local":
-            if "Support local" not in equipements_disponibles:
-                return False, "Support local non disponible"
         
         elif p == "autorisation":
-            if "Autorisation spéciale" not in equipements_disponibles:
-                return False, "Autorisation spéciale requise"
+            if "Autorisation spéciale" in equipements_disponibles:
+                prerequis_satisfaits += 1
         
-        elif p == "support_equipe":
-            if "Support d'équipe" not in equipements_disponibles:
-                return False, "Support d'équipe non disponible"
     
     # 2) Gérer les prérequis de compétences avec logique "AU MOINS 1" + comptage pour bonus
     competences_requises = [p for p in prerequis if p.startswith("competence_")]
@@ -372,11 +371,88 @@ def verifier_prerequis(action, agent, equipements_disponibles=None):
             return key in agent_comps_lower
         
         nb_ok = sum(1 for pr in competences_requises if match_comp(pr))
-        if nb_ok == 0:
-            return False, "Agent ne possède aucune des compétences requises"
+        if nb_ok > 0:
+            prerequis_satisfaits += nb_ok
         # NB: le bonus de vitesse sera appliqué au lancement (gestionnaire_actions)
     
-    return True, "Tous les prérequis sont satisfaits"
+    # 3) Vérifier qu'au moins 1 prérequis est satisfait
+    if prerequis_satisfaits == 0:
+        return False, "Aucun prérequis satisfait"
+    
+    # 4) Calculer le bonus de réussite basé sur le nombre de prérequis satisfaits
+    bonus_reussite = calculer_bonus_reussite_prerequis(prerequis_satisfaits, total_prerequis)
+    
+    return True, f"Prérequis satisfaits: {prerequis_satisfaits}/{total_prerequis} (Bonus: +{bonus_reussite}%)"
+
+def verifier_support_local(agent, equipements_disponibles=None):
+    """
+    Vérifie si l'agent a un support local (source recrutée par un réseau dans le pays)
+    """
+    try:
+        from reseaux import RESEAUX
+        
+        # Vérifier si l'agent a des actions en cours et récupérer le pays de la crise
+        pays_crise = None
+        
+        # Méthode 1: Vérifier via le gestionnaire d'actions
+        try:
+            from gestionnaire_actions import gestionnaire_actions
+            actions_agent = gestionnaire_actions.lister_actions_agent(f"{agent.nom} {agent.prenom}")
+            for action in actions_agent:
+                if hasattr(action, 'statut') and action.statut.value == "En cours":
+                    # Récupérer le pays de la crise
+                    try:
+                        from crises import CRISES
+                        for crise in CRISES:
+                            if crise.nom == action.crise_id:
+                                pays_crise = crise.pays
+                                break
+                        if pays_crise:
+                            break
+                    except ImportError:
+                        pass
+        except ImportError:
+            pass
+        
+        # Méthode 2: Fallback - vérifier tous les réseaux où l'agent est présent
+        if not pays_crise:
+            for nom_reseau, reseau in RESEAUX.items():
+                if agent in reseau["agents"]:
+                    pays_crise = reseau["pays"]
+                    break
+        
+        if not pays_crise:
+            return False
+        
+        # Vérifier si un réseau dans ce pays a des sources
+        for nom_reseau, reseau in RESEAUX.items():
+            if reseau["pays"].lower() == pays_crise.lower():
+                if reseau["sources"]:  # Si le réseau a des sources
+                    return True
+        
+        return False
+        
+    except ImportError:
+        return False
+
+def calculer_bonus_reussite_prerequis(prerequis_satisfaits, total_prerequis):
+    """
+    Calcule le bonus de réussite basé sur le nombre de prérequis satisfaits
+    """
+    if prerequis_satisfaits == 0:
+        return 0
+    
+    # Bonus progressif : plus on a de prérequis, plus la chance de réussite augmente
+    if prerequis_satisfaits == 1:
+        return 5      # +5% avec 1 prérequis (minimum requis)
+    elif prerequis_satisfaits == 2:
+        return 12     # +12% avec 2 prérequis
+    elif prerequis_satisfaits == 3:
+        return 20     # +20% avec 3 prérequis
+    elif prerequis_satisfaits == 4:
+        return 28     # +28% avec 4 prérequis
+    else:
+        return 35     # +35% avec 5+ prérequis (maximum)
 
 def calculer_cout_action(type_action, modificateurs=None):
     """Calcule le coût d'une action avec modificateurs"""

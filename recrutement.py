@@ -1,10 +1,9 @@
 import random
 from agents import Agent, ajouter_agent, generer_langues
-from noms import generer_nom_prenom
+from geographie import generer_nom_prenom, LANGUES_PAR_PAYS
 from metiers import METIERS, choisir_metier_competence, generer_metier_aleatoire
 from budget import debiter
 import budget
-from langues import LANGUES_PAR_PAYS
 from bureaux import lister_bureaux
 from datetime import datetime, timedelta
 
