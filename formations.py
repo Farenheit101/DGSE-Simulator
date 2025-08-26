@@ -30,7 +30,7 @@ _SKILL_CONFIG = {
 }
 
 # Import de la source unique des langues
-from langues import obtenir_toutes_langues
+from geographie import obtenir_toutes_langues
 
 # Configuration des coûts et difficultés par langue
 # Génération automatique basée sur la source unique de vérité
@@ -72,7 +72,7 @@ def _generer_config_langue(langue):
 
 # Génération automatique du catalogue des formations linguistiques
 def _generer_langues_formations():
-    """Génère automatiquement le catalogue des formations linguistiques depuis langues.py"""
+    """Génère automatiquement le catalogue des formations linguistiques depuis geographie.py"""
     import random
     catalogue = {}
     toutes_langues = obtenir_toutes_langues()

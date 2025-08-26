@@ -2,7 +2,7 @@
 
 import random
 from datetime import datetime, timedelta
-from villes import VILLES_PAR_PAYS
+from geographie import VILLES_PAR_PAYS
 
 MISSIONS = []
 

@@ -34,7 +34,7 @@ def generer_suspects_crise(pays, nb_suspects=1):
     """
     try:
         # Import local pour éviter les problèmes de dépendances circulaires
-        from noms import generer_nom_prenom
+        from geographie import generer_nom_prenom
         
         suspects = []
         for _ in range(nb_suspects):
@@ -42,7 +42,7 @@ def generer_suspects_crise(pays, nb_suspects=1):
                 nom, prenom = generer_nom_prenom(pays)
                 suspects.append(f"{prenom} {nom}")  # Format: "Prénom Nom"
             except:
-                # Fallback si le pays n'existe pas dans noms.py
+                # Fallback si le pays n'existe pas dans geographie.py
                 suspects.append(f"Suspect {random.randint(1000, 9999)}")
         return suspects
     except ImportError:

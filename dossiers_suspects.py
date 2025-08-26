@@ -3,7 +3,7 @@
 import random
 from datetime import datetime
 from metiers import METIERS, generer_metier_aleatoire
-from noms import generer_nom_prenom
+from geographie import generer_nom_prenom
 
 DOSSIERS_SUSPECTS = {}
 
